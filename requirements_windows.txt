@@ -1,0 +1,28 @@
+# Arena Bot Requirements for Windows
+# Install with: pip install -r requirements_windows.txt
+
+# Core computer vision
+opencv-python>=4.8.0
+
+# Image handling and screenshots
+Pillow>=10.0.0
+numpy>=1.24.0
+
+# GUI (should be built into Python on Windows)
+# tkinter comes with Python installation
+
+# Optional: Enhanced screenshot capabilities
+pyautogui>=0.9.54
+
+# JSON handling (built into Python)
+# json is built-in
+
+# File operations (built into Python)
+# pathlib is built-in
+# os is built-in
+
+# Threading (built into Python)
+# threading is built-in
+
+# Time operations (built into Python)
+# time is built-in

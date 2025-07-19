@@ -1,0 +1,78 @@
+# Exclude assets folder (too many files)
+assets/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+arena_venv/
+venv_fixed/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+logs/
+*.log
+
+# Debug images and frames
+debug_card_*.png
+debug_*.png
+screenshot_*.png
+debug_frames/
+debug_images/
+debug_data/
+
+# Test files and temporary data
+test_card_region_*.png
+debug_set*_card*.png
+newest.png
+aoejao.png
+
+# Temporary files
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db
+
+# Local configuration
+config_local.py
+settings_local.json
+settings.local.json
+coordinate_settings.json
+captured_coordinates.json
+
+# Cache files
+*.cache
+cache/
+
+# Zone Identifier files (Windows)
+*:Zone.Identifier
+
+# Backup files
+*.backup_*
