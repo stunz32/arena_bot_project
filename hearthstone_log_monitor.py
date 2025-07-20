@@ -65,22 +65,30 @@ class HearthstoneLogMonitor:
         self.current_game_state = GameState.UNKNOWN
         self.current_draft_picks: List[DraftPick] = []
         self.current_hero: Optional[str] = None
+        self.current_hero_choices: List[str] = []  # NEW: Available hero choices
+        self.draft_phase = "waiting"  # NEW: Track draft phase (hero_selection, card_picks)
         
         # Callbacks
         self.on_game_state_change = None
         self.on_draft_pick = None
         self.on_draft_start = None
         self.on_draft_complete = None
+        self.on_hero_choices_ready = None  # NEW: Hero selection callback
         
-        # Arena Tracker-style regex patterns
+        # Enhanced Arena Tracker-style regex patterns with hero detection
         self.patterns = {
             'draft_pick': re.compile(r'DraftManager\.OnChosen.*Slot=(\d+).*cardId=([A-Z0-9_]+).*Premium=(\w+)'),
             'draft_hero': re.compile(r'DraftManager\.OnHeroChosen.*HeroCardID=([A-Z0-9_]+)'),
+            'hero_choices': re.compile(r'DraftManager\.OnHeroChoices.*(\[.*\])'),  # NEW: Hero selection detection
+            'hero_choices_ready': re.compile(r'DraftManager\.OnHeroChoices'),  # NEW: Simple hero choices trigger
             'draft_choices': re.compile(r'DraftManager\.OnChoicesAndContents'),
             'draft_deck_card': re.compile(r'Draft deck contains card ([A-Z0-9_]+)'),
             'scene_loaded': re.compile(r'LoadingScreen\.OnSceneLoaded.*currMode=(\w+)'),
             'scene_unload': re.compile(r'LoadingScreen\.OnScenePreUnload.*nextMode=(\w+)'),
             'asset_load': re.compile(r'AssetLoader.*Loading.*([A-Z0-9_]+)'),
+            # Additional patterns for hero detection
+            'hero_card_def': re.compile(r'cardDef.*id=([A-Z0-9_]+).*cardType=HERO'),
+            'hero_power': re.compile(r'HERO_POWER.*cardId=([A-Z0-9_]+)'),
         }
         
         print("🎯 Hearthstone Log Monitor Initialized")
@@ -300,14 +308,46 @@ class HearthstoneLogMonitor:
                     if self.on_draft_complete:
                         self.on_draft_complete(self.current_draft_picks)
             
-            # Hero selection
+            # NEW: Hero choices detection
+            hero_choices_match = self.patterns['hero_choices_ready'].search(message)
+            if hero_choices_match:
+                self.draft_phase = "hero_selection"
+                print(f"👑 HERO CHOICES READY")
+                
+                # Try to extract hero card IDs from the message
+                hero_ids = self._extract_hero_card_ids(message)
+                if hero_ids:
+                    self.current_hero_choices = hero_ids
+                    hero_classes = self._translate_hero_ids_to_classes(hero_ids)
+                    print(f"🎯 Hero options: {', '.join(hero_classes)}")
+                    
+                    # Trigger callback for AI v2 hero selection
+                    if self.on_hero_choices_ready:
+                        self.on_hero_choices_ready({
+                            'event': 'HERO_CHOICES_READY',
+                            'hero_card_ids': hero_ids,
+                            'hero_classes': hero_classes,
+                            'timestamp': entry.timestamp
+                        })
+                else:
+                    # Fallback - just notify that hero choices are available
+                    if self.on_hero_choices_ready:
+                        self.on_hero_choices_ready({
+                            'event': 'HERO_CHOICES_READY',
+                            'hero_card_ids': [],
+                            'hero_classes': [],
+                            'timestamp': entry.timestamp
+                        })
+            
+            # Hero selection (when choice is made)
             hero_match = self.patterns['draft_hero'].search(message)
             if hero_match:
                 hero_code = hero_match.group(1)
                 self.current_hero = hero_code
+                self.draft_phase = "card_picks"
                 print(f"👑 HERO SELECTED: {hero_code}")
             
-            # Draft start detection
+            # Draft start detection (card picks phase)
             if self.patterns['draft_choices'].search(message):
                 if self.current_game_state != GameState.ARENA_DRAFT:
                     self._display_draft_start()
@@ -315,6 +355,10 @@ class HearthstoneLogMonitor:
                     self._set_game_state(GameState.ARENA_DRAFT)
                     if self.on_draft_start:
                         self.on_draft_start()
+                
+                # Enhanced with hero context
+                if self.draft_phase != "hero_selection":
+                    self.draft_phase = "card_picks"
             
             # Current deck contents (for mid-draft analysis)
             deck_card_match = self.patterns['draft_deck_card'].search(message)
@@ -392,18 +436,74 @@ class HearthstoneLogMonitor:
         
         print("█" + " " * 78 + "█")
         print("█" * 80)
-        
-        # Add context-specific information
-        if new_state == GameState.HUB:
-            print("🎮 You're in the main menu - ready to start Arena!")
-        elif new_state == GameState.ARENA_DRAFT:
-            print("🎯 Arena draft detected - monitoring for card picks...")
-        elif new_state == GameState.GAMEPLAY:
-            print("⚔️ Match in progress - Arena Bot on standby")
-        elif new_state == GameState.COLLECTION:
-            print("📚 Collection browsing - Arena Bot waiting")
-        
-        print()
+    
+    def _extract_hero_card_ids(self, message: str) -> List[str]:
+        """Extract hero card IDs from DraftManager.OnHeroChoices message."""
+        try:
+            # Look for card ID patterns in the message
+            card_id_pattern = re.compile(r'([A-Z0-9_]+_\d+|HERO_\d+)')
+            matches = card_id_pattern.findall(message)
+            
+            # Filter to likely hero card IDs
+            hero_ids = []
+            for match in matches:
+                if 'HERO_' in match or len(match) > 5:  # Basic filtering
+                    hero_ids.append(match)
+            
+            # Remove duplicates while preserving order
+            seen = set()
+            unique_hero_ids = []
+            for hero_id in hero_ids:
+                if hero_id not in seen:
+                    seen.add(hero_id)
+                    unique_hero_ids.append(hero_id)
+            
+            return unique_hero_ids[:3]  # Maximum 3 hero choices
+            
+        except Exception as e:
+            print(f"❌ Error extracting hero card IDs: {e}")
+            return []
+    
+    def _translate_hero_ids_to_classes(self, hero_ids: List[str]) -> List[str]:
+        """Translate hero card IDs to class names using CardsJsonLoader."""
+        try:
+            # Import here to avoid circular imports
+            import sys
+            from pathlib import Path
+            sys.path.append(str(Path(__file__).parent / "arena_bot" / "data"))
+            from cards_json_loader import get_cards_json_loader
+            
+            cards_loader = get_cards_json_loader()
+            hero_classes = []
+            
+            for hero_id in hero_ids:
+                class_name = cards_loader.get_class_from_hero_card_id(hero_id)
+                if class_name:
+                    hero_classes.append(class_name)
+                else:
+                    # Fallback mapping for common hero IDs
+                    fallback_mapping = {
+                        'HERO_01': 'WARRIOR',
+                        'HERO_02': 'MAGE', 
+                        'HERO_03': 'HUNTER',
+                        'HERO_04': 'PRIEST',
+                        'HERO_05': 'WARLOCK',
+                        'HERO_06': 'ROGUE',
+                        'HERO_07': 'SHAMAN',
+                        'HERO_08': 'PALADIN',
+                        'HERO_09': 'DRUID',
+                        'HERO_10': 'DEMONHUNTER'
+                    }
+                    fallback_class = fallback_mapping.get(hero_id, 'UNKNOWN')
+                    hero_classes.append(fallback_class)
+                    print(f"⚠️ Used fallback mapping for {hero_id} -> {fallback_class}")
+            
+            return hero_classes
+            
+        except Exception as e:
+            print(f"❌ Error translating hero IDs to classes: {e}")
+            # Emergency fallback
+            return ['WARRIOR', 'MAGE', 'HUNTER'][:len(hero_ids)]
     
     def _display_draft_start(self):
         """Display prominent draft start notification."""

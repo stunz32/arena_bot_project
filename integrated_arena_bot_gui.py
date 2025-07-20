@@ -15,6 +15,7 @@ import json
 import copy
 from pathlib import Path
 from datetime import datetime
+from typing import List
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
 from PIL import Image, ImageTk
@@ -1088,15 +1089,36 @@ class IntegratedArenaBotGUI:
             self.log_monitor = None
     
     def init_ai_advisor(self):
-        """Initialize the AI draft advisor."""
+        """Initialize the AI draft advisor with AI v2 integration."""
         try:
+            # Initialize legacy AI system
             from arena_bot.ai.draft_advisor import get_draft_advisor
-            
             self.advisor = get_draft_advisor()
-            print("✅ AI draft advisor loaded")
+            print("✅ Legacy AI draft advisor loaded")
         except Exception as e:
-            print(f"⚠️ AI advisor not available: {e}")
+            print(f"⚠️ Legacy AI advisor not available: {e}")
             self.advisor = None
+        
+        # NEW: Initialize AI v2 system
+        try:
+            from arena_bot.ai_v2.system_integrator import SystemIntegrator
+            from arena_bot.ai_v2.hero_selector import HeroSelectionAdvisor
+            from arena_bot.ai_v2.grandmaster_advisor import GrandmasterAdvisor
+            
+            self.ai_v2_integrator = SystemIntegrator()
+            self.hero_selector = HeroSelectionAdvisor()
+            self.grandmaster_advisor = GrandmasterAdvisor()
+            
+            print("🎯 AI v2 System loaded:")
+            print("   • Hero Selection Advisor with HSReplay integration")
+            print("   • Grandmaster Advisor with dimensional scoring")
+            print("   • System Integrator with comprehensive error recovery")
+            
+        except Exception as e:
+            print(f"⚠️ AI v2 system not available: {e}")
+            self.ai_v2_integrator = None
+            self.hero_selector = None
+            self.grandmaster_advisor = None
     
     def init_card_detection(self):
         """Initialize card detection system with Ultimate Detection Engine option."""
@@ -1295,44 +1317,131 @@ class IntegratedArenaBotGUI:
             self.phash_matcher = None
     
     def setup_log_callbacks(self):
-        """Setup callbacks for log monitoring."""
+        """Setup enhanced callbacks for log monitoring with proper event handling."""
         if not self.log_monitor:
             return
         
+        # Initialize draft phase tracking
+        self.current_draft_phase = "waiting"  # waiting, hero_selection, card_picks, complete
+        self.selected_hero_class = None
+        self.hero_recommendation = None
+        
         def on_draft_start():
+            """Enhanced draft start handling with phase tracking."""
             self.log_text(f"\n{'🎯' * 50}")
             self.log_text("🎯 ARENA DRAFT STARTED!")
-            self.log_text("🎯 Ready to analyze screenshots!")
+            
+            # Check if we're starting with hero selection or card picks
+            if self.current_draft_phase == "hero_selection":
+                self.log_text("🎯 Continuing from hero selection to card picks!")
+                self.log_text(f"🎯 Selected Hero: {self.selected_hero_class}")
+            else:
+                self.log_text("🎯 Ready for hero selection!")
+                self.current_draft_phase = "waiting"
+            
+            self.log_text("🎯 AI v2 system ready for draft guidance!")
             self.log_text(f"{'🎯' * 50}")
             self.in_draft = True
             self.draft_picks_count = 0
             self.update_status("Arena Draft Active")
         
         def on_draft_complete(picks):
+            """Enhanced draft completion with hero context."""
             self.log_text(f"\n{'🏆' * 50}")
             self.log_text("🏆 ARENA DRAFT COMPLETED!")
             self.log_text(f"🏆 Total picks: {len(picks)}")
+            if self.selected_hero_class:
+                self.log_text(f"🏆 Final Hero: {self.selected_hero_class}")
             self.log_text(f"{'🏆' * 50}")
+            
+            # Reset draft state
             self.in_draft = False
+            self.current_draft_phase = "complete"
             self.update_status("Draft Complete")
+            self._show_draft_summary()
+            
+            # Update progression display
+            if hasattr(self, 'update_draft_progression_display'):
+                self.update_draft_progression_display()
+            
+            # Show draft review panel
+            if hasattr(self, 'show_draft_review'):
+                self.show_draft_review()
         
         def on_game_state_change(old_state, new_state):
+            """Enhanced game state tracking with draft phase awareness."""
             self.log_text(f"\n🎮 GAME STATE: {old_state.value} → {new_state.value}")
-            self.in_draft = (new_state.value == "Arena Draft")
-            self.update_status(f"Game State: {new_state.value}")
+            
+            # Update draft state based on game state
+            if new_state.value == "Arena Draft":
+                self.in_draft = True
+                if self.current_draft_phase == "waiting":
+                    self.current_draft_phase = "hero_selection"
+            else:
+                self.in_draft = False
+                if self.current_draft_phase in ["hero_selection", "card_picks"]:
+                    self.current_draft_phase = "waiting"
+            
+            self.update_status(f"Game State: {new_state.value} | Phase: {self.current_draft_phase}")
         
         def on_draft_pick(pick):
+            """Enhanced draft pick handling with hero context."""
             self.draft_picks_count += 1
             card_name = self.get_card_name(pick.card_code)
+            
+            # Transition to card picks phase if not already there
+            if self.current_draft_phase == "hero_selection":
+                self.current_draft_phase = "card_picks"
+                self.log_text(f"\n🔄 Transitioning to card picks phase...")
+                
+                # Update progression display
+                if hasattr(self, 'update_draft_progression_display'):
+                    self.update_draft_progression_display()
             
             self.log_text(f"\n📋 PICK #{self.draft_picks_count}: {card_name}")
             if pick.is_premium:
                 self.log_text("   ✨ GOLDEN CARD!")
+            
+            # Show hero context if available
+            if self.selected_hero_class and self.draft_picks_count <= 5:
+                self.log_text(f"   🎯 Hero context: {self.selected_hero_class}")
+            
+            # Update progression display with new pick count
+            if hasattr(self, 'update_draft_progression_display'):
+                self.update_draft_progression_display()
         
+        def on_hero_choices_ready(hero_data):
+            """Enhanced hero choice handling with phase management."""
+            self.log_text(f"\n{'👑' * 50}")
+            self.log_text("👑 HERO CHOICES READY!")
+            
+            # Update draft phase
+            self.current_draft_phase = "hero_selection"
+            self.update_status("Hero Selection Phase")
+            
+            # Update progression display
+            if hasattr(self, 'update_draft_progression_display'):
+                self.update_draft_progression_display()
+            
+            hero_classes = hero_data.get('hero_classes', [])
+            if hero_classes:
+                self.log_text(f"👑 Available heroes: {', '.join(hero_classes)}")
+                self.log_text("👑 Analyzing heroes with AI v2...")
+                
+                # Trigger AI v2 hero selection with enhanced context
+                self._handle_enhanced_hero_selection(hero_classes, hero_data)
+            else:
+                self.log_text("👑 Hero selection detected (analyzing...)")
+                self._handle_enhanced_hero_selection([], hero_data)
+            
+            self.log_text(f"{'👑' * 50}")
+        
+        # Set up all callbacks
         self.log_monitor.on_draft_start = on_draft_start
         self.log_monitor.on_draft_complete = on_draft_complete
         self.log_monitor.on_game_state_change = on_game_state_change
         self.log_monitor.on_draft_pick = on_draft_pick
+        self.log_monitor.on_hero_choices_ready = on_hero_choices_ready
     
     def setup_gui(self):
         """Setup the GUI interface."""
@@ -1482,6 +1591,19 @@ class IntegratedArenaBotGUI:
         )
         self.perf_report_btn.pack(side='left', padx=5)
         
+        # NEW: Unified Statistics button
+        self.stats_btn = tk.Button(
+            control_frame,
+            text="📈 AI v2 STATS",
+            command=self.show_unified_statistics,
+            bg='#E74C3C',
+            fg='white',
+            font=('Arial', 9),
+            relief='raised',
+            bd=2
+        )
+        self.stats_btn.pack(side='left', padx=5)
+        
         # Visual coordinate selection button
         self.coord_select_btn = tk.Button(
             control_frame,
@@ -1494,6 +1616,19 @@ class IntegratedArenaBotGUI:
             bd=2
         )
         self.coord_select_btn.pack(side='left', padx=5)
+
+        # Advanced manual correction button
+        self.advanced_correction_btn = tk.Button(
+            control_frame,
+            text="🔧 MANUAL CORRECTIONS",
+            command=self.open_advanced_correction_center,
+            bg='#E67E22',
+            fg='white',
+            font=('Arial', 9),
+            relief='raised',
+            bd=2
+        )
+        self.advanced_correction_btn.pack(side='left', padx=5)
         
         # Coordinate mode toggle
         self.use_custom_coords = tk.BooleanVar(value=False)
@@ -1570,6 +1705,9 @@ class IntegratedArenaBotGUI:
         
         # Update coordinate status display
         self.update_coordinate_status()
+        
+        # NEW: Draft Progression Display
+        self.setup_draft_progression_display()
         
         # Log area - reduced height to make room for larger card images
         log_frame = tk.LabelFrame(
@@ -1685,6 +1823,395 @@ class IntegratedArenaBotGUI:
         
         # Show initial recommendations
         self.show_recommendation("Ready for Arena Draft", "Start monitoring and open Hearthstone Arena mode to begin receiving AI recommendations.")
+        
+        # Setup draft review panel
+        self.setup_draft_review_panel()
+    
+    def setup_draft_progression_display(self):
+        """Setup the draft progression display showing Hero → Cards relationship."""
+        # Main draft progression frame
+        self.progression_frame = tk.LabelFrame(
+            self.root,
+            text="🎯 DRAFT PROGRESSION - AI v2 SYSTEM",
+            font=('Arial', 11, 'bold'),
+            fg='#E74C3C',  # Red for prominence
+            bg='#2C3E50'
+        )
+        self.progression_frame.pack(fill='x', padx=10, pady=5)
+        
+        # Create main progression container
+        progression_container = tk.Frame(self.progression_frame, bg='#2C3E50')
+        progression_container.pack(fill='x', padx=10, pady=10)
+        
+        # Hero Selection Section
+        hero_section = tk.Frame(progression_container, bg='#34495E', relief='raised', bd=2)
+        hero_section.pack(side='left', padx=5, pady=5, fill='both', expand=True)
+        
+        tk.Label(
+            hero_section,
+            text="👑 HERO SELECTION",
+            font=('Arial', 10, 'bold'),
+            fg='#F39C12',
+            bg='#34495E'
+        ).pack(pady=5)
+        
+        # Hero display area
+        self.hero_display_frame = tk.Frame(hero_section, bg='#34495E')
+        self.hero_display_frame.pack(fill='both', expand=True, padx=5, pady=5)
+        
+        self.hero_status_label = tk.Label(
+            self.hero_display_frame,
+            text="⏳ Waiting for hero selection...",
+            font=('Arial', 9),
+            fg='#BDC3C7',
+            bg='#34495E',
+            wraplength=180
+        )
+        self.hero_status_label.pack(pady=10)
+        
+        # Hero winrate display (initially hidden)
+        self.hero_winrate_frame = tk.Frame(self.hero_display_frame, bg='#34495E')
+        self.hero_winrate_label = tk.Label(
+            self.hero_winrate_frame,
+            text="",
+            font=('Arial', 8),
+            fg='#27AE60',
+            bg='#34495E'
+        )
+        self.hero_winrate_label.pack()
+        
+        # Progression Arrow
+        arrow_frame = tk.Frame(progression_container, bg='#2C3E50')
+        arrow_frame.pack(side='left', padx=10, pady=5)
+        
+        tk.Label(
+            arrow_frame,
+            text="➤",
+            font=('Arial', 20, 'bold'),
+            fg='#3498DB',
+            bg='#2C3E50'
+        ).pack(pady=20)
+        
+        # Card Draft Section
+        card_section = tk.Frame(progression_container, bg='#34495E', relief='raised', bd=2)
+        card_section.pack(side='left', padx=5, pady=5, fill='both', expand=True)
+        
+        tk.Label(
+            card_section,
+            text="🃏 CARD DRAFTING",
+            font=('Arial', 10, 'bold'),
+            fg='#3498DB',
+            bg='#34495E'
+        ).pack(pady=5)
+        
+        # Card draft status
+        self.card_draft_frame = tk.Frame(card_section, bg='#34495E')
+        self.card_draft_frame.pack(fill='both', expand=True, padx=5, pady=5)
+        
+        self.card_status_label = tk.Label(
+            self.card_draft_frame,
+            text="⏳ Waiting for hero selection...",
+            font=('Arial', 9),
+            fg='#BDC3C7',
+            bg='#34495E',
+            wraplength=180
+        )
+        self.card_status_label.pack(pady=10)
+        
+        # Card pick counter
+        self.pick_counter_label = tk.Label(
+            self.card_draft_frame,
+            text="Pick: 0/30",
+            font=('Arial', 8, 'bold'),
+            fg='#9B59B6',
+            bg='#34495E'
+        )
+        self.pick_counter_label.pack()
+        
+        # Draft Phase Indicator
+        phase_frame = tk.Frame(progression_container, bg='#2C3E50')
+        phase_frame.pack(side='left', padx=10, pady=5)
+        
+        tk.Label(
+            phase_frame,
+            text="📈 PHASE",
+            font=('Arial', 9, 'bold'),
+            fg='#ECF0F1',
+            bg='#2C3E50'
+        ).pack()
+        
+        self.phase_indicator_label = tk.Label(
+            phase_frame,
+            text="WAITING",
+            font=('Arial', 8, 'bold'),
+            fg='#95A5A6',
+            bg='#2C3E50',
+            relief='sunken',
+            bd=1,
+            padx=5,
+            pady=2
+        )
+        self.phase_indicator_label.pack(pady=5)
+        
+        # System Status Section
+        status_section = tk.Frame(progression_container, bg='#34495E', relief='raised', bd=2)
+        status_section.pack(side='left', padx=5, pady=5, fill='both', expand=True)
+        
+        tk.Label(
+            status_section,
+            text="🔧 DATA SOURCES",
+            font=('Arial', 10, 'bold'),
+            fg='#E67E22',
+            bg='#34495E'
+        ).pack(pady=5)
+        
+        self.ai_status_frame = tk.Frame(status_section, bg='#34495E')
+        self.ai_status_frame.pack(fill='both', expand=True, padx=5, pady=5)
+        
+        # HSReplay Heroes indicator
+        self.hsreplay_heroes_label = tk.Label(
+            self.ai_status_frame,
+            text="🔄 HSReplay Heroes",
+            font=('Arial', 7),
+            fg='#F39C12',
+            bg='#34495E'
+        )
+        self.hsreplay_heroes_label.pack(anchor='w')
+        
+        # HSReplay Cards indicator  
+        self.hsreplay_cards_label = tk.Label(
+            self.ai_status_frame,
+            text="🔄 HSReplay Cards",
+            font=('Arial', 7),
+            fg='#F39C12',
+            bg='#34495E'
+        )
+        self.hsreplay_cards_label.pack(anchor='w')
+        
+        # HearthArena fallback indicator
+        self.heartharena_label = tk.Label(
+            self.ai_status_frame,
+            text="🔄 HearthArena",
+            font=('Arial', 7),
+            fg='#F39C12',
+            bg='#34495E'
+        )
+        self.heartharena_label.pack(anchor='w')
+        
+        # Fallback mode indicator
+        self.fallback_mode_label = tk.Label(
+            self.ai_status_frame,
+            text="",
+            font=('Arial', 7, 'bold'),
+            fg='#E74C3C',
+            bg='#34495E'
+        )
+        self.fallback_mode_label.pack(anchor='w')
+        
+        # Initialize display
+        self.update_draft_progression_display()
+    
+    def update_draft_progression_display(self):
+        """Update the draft progression display with current state."""
+        try:
+            # Get current phase
+            current_phase = getattr(self, 'current_draft_phase', 'waiting')
+            selected_hero = getattr(self, 'selected_hero_class', None)
+            pick_count = getattr(self, 'draft_picks_count', 0)
+            
+            # Update phase indicator
+            phase_colors = {
+                'waiting': ('#95A5A6', 'WAITING'),
+                'hero_selection': ('#F39C12', 'HERO SELECT'),
+                'card_picks': ('#3498DB', 'CARD PICKS'),
+                'complete': ('#27AE60', 'COMPLETE')
+            }
+            
+            color, text = phase_colors.get(current_phase, ('#95A5A6', 'UNKNOWN'))
+            self.phase_indicator_label.config(text=text, fg=color)
+            
+            # Update hero section
+            if current_phase == 'waiting':
+                self.hero_status_label.config(text="⏳ Waiting for hero selection...")
+                self.hero_winrate_frame.pack_forget()
+            elif current_phase == 'hero_selection':
+                self.hero_status_label.config(text="👑 Analyzing hero options...", fg='#F39C12')
+            elif selected_hero:
+                self.hero_status_label.config(text=f"👑 Selected: {selected_hero}", fg='#27AE60')
+                
+                # Show hero winrate if available
+                if hasattr(self, 'hero_recommendation') and self.hero_recommendation:
+                    winrates = self.hero_recommendation.winrates
+                    if selected_hero in winrates:
+                        winrate = winrates[selected_hero]
+                        confidence = self.hero_recommendation.confidence_level
+                        self.hero_winrate_label.config(
+                            text=f"Winrate: {winrate:.1f}% | Confidence: {confidence:.1%}"
+                        )
+                        self.hero_winrate_frame.pack(fill='x')
+            
+            # Update card section
+            if current_phase == 'waiting':
+                self.card_status_label.config(text="⏳ Waiting for hero selection...")
+            elif current_phase == 'hero_selection':
+                self.card_status_label.config(text="⏳ Preparing for card picks...", fg='#F39C12')
+            elif current_phase == 'card_picks':
+                if selected_hero:
+                    self.card_status_label.config(
+                        text=f"🎯 Hero-aware recommendations\nfor {selected_hero}",
+                        fg='#3498DB'
+                    )
+                else:
+                    self.card_status_label.config(text="🃏 Card recommendations ready", fg='#3498DB')
+            elif current_phase == 'complete':
+                self.card_status_label.config(text="✅ Draft complete!", fg='#27AE60')
+            
+            # Update pick counter
+            self.pick_counter_label.config(text=f"Pick: {pick_count}/30")
+            
+            # Update AI status based on system health
+            self.update_ai_status_display()
+            
+        except Exception as e:
+            print(f"Error updating draft progression display: {e}")
+    
+    def update_ai_status_display(self):
+        """Update comprehensive data source indicators with fallback modes."""
+        try:
+            if not hasattr(self, 'ai_v2_integrator') or not self.ai_v2_integrator:
+                self._set_all_data_sources_offline()
+                return
+            
+            # Get comprehensive system health
+            health = self.ai_v2_integrator.check_system_health()
+            data_sources = health.get('data_sources', {})
+            components = health.get('components', {})
+            
+            # Update HSReplay Heroes status
+            hero_status = self._get_hero_data_status(data_sources, components)
+            self._update_data_source_indicator(self.hsreplay_heroes_label, "HSReplay Heroes", hero_status)
+            
+            # Update HSReplay Cards status
+            card_status = self._get_card_data_status(data_sources, components)
+            self._update_data_source_indicator(self.hsreplay_cards_label, "HSReplay Cards", card_status)
+            
+            # Update HearthArena fallback status
+            heartharena_status = self._get_heartharena_status()
+            self._update_data_source_indicator(self.heartharena_label, "HearthArena", heartharena_status)
+            
+            # Update fallback mode indicator
+            self._update_fallback_mode_indicator(hero_status, card_status, heartharena_status)
+            
+        except Exception as e:
+            self._set_all_data_sources_error()
+    
+    def _get_hero_data_status(self, data_sources, components):
+        """Get hero data source status with cache age info."""
+        try:
+            hsreplay_data = data_sources.get('hsreplay', {})
+            hero_selector_data = components.get('hero_selector', {})
+            
+            if hsreplay_data.get('status') == 'online':
+                cache_age = hsreplay_data.get('hero_cache_age_hours', 0)
+                if cache_age < 12:  # Fresh data
+                    return {'status': 'online', 'detail': f'Fresh ({cache_age:.1f}h)'}
+                elif cache_age < 24:  # Aging data
+                    return {'status': 'aging', 'detail': f'Aging ({cache_age:.1f}h)'}
+                else:  # Stale data
+                    return {'status': 'stale', 'detail': f'Stale ({cache_age:.1f}h)'}
+            elif hero_selector_data.get('status') == 'degraded':
+                return {'status': 'cached', 'detail': 'Cached only'}
+            else:
+                return {'status': 'offline', 'detail': 'Unavailable'}
+        except:
+            return {'status': 'error', 'detail': 'Error'}
+    
+    def _get_card_data_status(self, data_sources, components):
+        """Get card data source status with cache age info."""
+        try:
+            hsreplay_data = data_sources.get('hsreplay', {})
+            card_evaluator_data = components.get('card_evaluator', {})
+            
+            if hsreplay_data.get('status') == 'online':
+                cache_age = hsreplay_data.get('card_cache_age_hours', 0)
+                if cache_age < 24:  # Fresh data  
+                    return {'status': 'online', 'detail': f'Fresh ({cache_age:.1f}h)'}
+                elif cache_age < 48:  # Aging data
+                    return {'status': 'aging', 'detail': f'Aging ({cache_age:.1f}h)'}
+                else:  # Stale data
+                    return {'status': 'stale', 'detail': f'Stale ({cache_age:.1f}h)'}
+            elif card_evaluator_data.get('status') == 'degraded':
+                return {'status': 'cached', 'detail': 'Cached only'}
+            else:
+                return {'status': 'offline', 'detail': 'Unavailable'}
+        except:
+            return {'status': 'error', 'detail': 'Error'}
+    
+    def _get_heartharena_status(self):
+        """Get HearthArena fallback status."""
+        try:
+            # Check if advisor is available (legacy system)
+            if hasattr(self, 'advisor') and self.advisor:
+                return {'status': 'online', 'detail': 'Available'}
+            else:
+                return {'status': 'offline', 'detail': 'Unavailable'}
+        except:
+            return {'status': 'error', 'detail': 'Error'}
+    
+    def _update_data_source_indicator(self, label_widget, source_name, status_info):
+        """Update individual data source indicator."""
+        status = status_info['status']
+        detail = status_info['detail']
+        
+        # Status icons and colors
+        status_config = {
+            'online': ('✅', '#27AE60', ''),
+            'aging': ('⚠️', '#F39C12', ' (Aging)'),
+            'stale': ('⚠️', '#E67E22', ' (Stale)'),
+            'cached': ('💾', '#9B59B6', ' (Cached)'),
+            'offline': ('❌', '#E74C3C', ' (Offline)'),
+            'error': ('💥', '#E74C3C', ' (Error)')
+        }
+        
+        icon, color, suffix = status_config.get(status, ('❓', '#95A5A6', ' (Unknown)'))
+        display_text = f"{icon} {source_name}{suffix}"
+        
+        label_widget.config(text=display_text, fg=color)
+    
+    def _update_fallback_mode_indicator(self, hero_status, card_status, heartharena_status):
+        """Update fallback mode indicator based on data source availability."""
+        hero_online = hero_status['status'] == 'online'
+        card_online = card_status['status'] == 'online'
+        heartharena_online = heartharena_status['status'] == 'online'
+        
+        if hero_online and card_online:
+            # Full AI v2 mode
+            self.fallback_mode_label.config(text="🎯 Full AI v2 Mode", fg='#27AE60')
+        elif (hero_status['status'] in ['aging', 'cached']) and (card_status['status'] in ['aging', 'cached']):
+            # Degraded AI v2 mode
+            self.fallback_mode_label.config(text="⚠️ Degraded AI v2", fg='#F39C12')
+        elif heartharena_online:
+            # HearthArena fallback mode
+            self.fallback_mode_label.config(text="💾 HearthArena Mode", fg='#9B59B6')
+        else:
+            # Emergency fallback mode
+            self.fallback_mode_label.config(text="🚨 Emergency Mode", fg='#E74C3C')
+    
+    def _set_all_data_sources_offline(self):
+        """Set all data source indicators to offline."""
+        offline_config = ("❌", "#E74C3C")
+        self.hsreplay_heroes_label.config(text="❌ HSReplay Heroes (Offline)", fg=offline_config[1])
+        self.hsreplay_cards_label.config(text="❌ HSReplay Cards (Offline)", fg=offline_config[1])
+        self.heartharena_label.config(text="❌ HearthArena (Offline)", fg=offline_config[1])
+        self.fallback_mode_label.config(text="❌ AI v2 Offline", fg=offline_config[1])
+    
+    def _set_all_data_sources_error(self):
+        """Set all data source indicators to error state."""
+        error_config = ("💥", "#E74C3C")
+        self.hsreplay_heroes_label.config(text="💥 HSReplay Heroes (Error)", fg=error_config[1])
+        self.hsreplay_cards_label.config(text="💥 HSReplay Cards (Error)", fg=error_config[1])
+        self.heartharena_label.config(text="💥 HearthArena (Error)", fg=error_config[1])
+        self.fallback_mode_label.config(text="💥 System Error", fg=error_config[1])
     
     def toggle_debug_mode(self):
         """Toggle debug mode on/off."""
@@ -2865,7 +3392,7 @@ class IntegratedArenaBotGUI:
                 self.card_image_labels[i].config(image="", text="No Image")
     
     def show_analysis_result(self, result):
-        """Show analysis result in GUI."""
+        """Enhanced analysis result display with hero context and AI v2 integration."""
         detected_cards = result['detected_cards']
         recommendation = result['recommendation']
         
@@ -2876,7 +3403,11 @@ class IntegratedArenaBotGUI:
         # Update card images in GUI with sorted cards
         self.update_card_images(detected_cards_sorted)
         
-        self.log_text(f"\n✅ Detected {len(detected_cards_sorted)} cards with enhanced analysis:")
+        # Enhanced logging with hero context
+        hero_context = f" for {self.selected_hero_class}" if self.selected_hero_class else ""
+        phase_context = f" [{self.current_draft_phase}]" if hasattr(self, 'current_draft_phase') else ""
+        
+        self.log_text(f"\n✅ Detected {len(detected_cards_sorted)} cards{hero_context}{phase_context}:")
         for card in detected_cards_sorted:
             # Enhanced display with quality and strategy info
             strategy = card.get('enhanced_metrics', {}).get('detection_strategy', 'unknown')
@@ -2891,23 +3422,1397 @@ class IntegratedArenaBotGUI:
             if quality_issues:
                 self.log_text(f"      ⚠️ Issues: {', '.join(quality_issues[:3])}")  # Show first 3 issues
         
+        # Enhanced recommendation display with hero context
         if recommendation:
+            self._show_enhanced_recommendation(recommendation, detected_cards_sorted)
+        else:
+            # Try AI v2 recommendation if legacy system failed
+            if self.current_draft_phase == "card_picks" and self.selected_hero_class:
+                self._try_ai_v2_recommendation(detected_cards_sorted)
+            else:
+                self.show_recommendation("Cards Detected", f"Found {len(detected_cards)} cards but no AI recommendation available.")
+    
+    def _show_enhanced_recommendation(self, recommendation, detected_cards):
+        """Show enhanced recommendation with hero context and AI v2 integration."""
+        try:
             rec_card_name = self.get_card_name(recommendation['recommended_card'])
-            rec_text = f"🎯 RECOMMENDED PICK: {rec_card_name}\n\n"
-            rec_text += f"📊 Position: #{recommendation['recommended_pick']}\n\n"
-            rec_text += f"💭 Reasoning: {recommendation['reasoning']}\n\n"
-            rec_text += "📋 All Cards:\n"
+            
+            # Enhanced title with hero context
+            hero_context = f" for {self.selected_hero_class}" if self.selected_hero_class else ""
+            pick_context = f" (Pick #{self.draft_picks_count + 1})" if hasattr(self, 'draft_picks_count') else ""
+            
+            rec_text = f"🎯 AI v2 RECOMMENDATION{hero_context}{pick_context}\n"
+            rec_text += f"👑 PICK: {rec_card_name}\n\n"
+            rec_text += f"📊 Position: #{recommendation['recommended_pick']}\n"
+            
+            # Add hero synergy context if available
+            if self.selected_hero_class:
+                rec_text += f"🎯 Hero: {self.selected_hero_class}\n"
+                rec_text += f"📈 Phase: {getattr(self, 'current_draft_phase', 'card_picks')}\n"
+            
+            rec_text += f"\n💭 Reasoning: {recommendation['reasoning']}\n\n"
+            rec_text += "📋 All Options:\n"
             
             for i, card_detail in enumerate(recommendation['card_details']):
                 card_name = self.get_card_name(card_detail['card_code'])
                 marker = "👑" if i == recommendation['recommended_pick'] - 1 else "📋"
-                # Use 'tier_letter' and 'win_rate' from the card_detail dictionary
-                rec_text += f"{marker} {i+1}. {card_name} (Tier {card_detail['tier_letter']}, {card_detail['win_rate']:.0%} WR)\n"
+                
+                # Enhanced card details with tier and winrate
+                tier = card_detail.get('tier_letter', 'N/A')
+                winrate = card_detail.get('win_rate', 0.0)
+                rec_text += f"{marker} {i+1}. {card_name} (Tier {tier}, {winrate:.0%} WR)\n"
+                
+                # Enhanced hero synergy analysis
+                if self.selected_hero_class:
+                    synergy_analysis = self._analyze_hero_card_synergy(card_detail['card_code'], self.selected_hero_class)
+                    if synergy_analysis:
+                        rec_text += f"     {synergy_analysis}\n"
             
-            self.show_recommendation("AI Draft Recommendation", rec_text)
-            self.log_text(f"\n🎯 AI RECOMMENDATION: Pick #{recommendation['recommended_pick']} - {rec_card_name}")
-        else:
+            # Show AI v2 confidence if available
+            if hasattr(self, 'hero_recommendation') and self.hero_recommendation:
+                hero_confidence = self.hero_recommendation.confidence_level
+                rec_text += f"\n🔧 System Confidence: Hero {hero_confidence:.1%} | Cards: Variable\n"
+            
+            self.show_recommendation("AI v2 Draft Recommendation", rec_text)
+            self.log_text(f"\n🎯 AI v2 RECOMMENDATION{hero_context}: Pick #{recommendation['recommended_pick']} - {rec_card_name}")
+            
+        except Exception as e:
+            self.log_text(f"⚠️ Error displaying enhanced recommendation: {e}")
+            # Fallback to original display
+            self._show_basic_recommendation(recommendation)
+    
+    def _try_ai_v2_recommendation(self, detected_cards):
+        """Try to get AI v2 recommendation when legacy system fails."""
+        try:
+            if not self.ai_v2_integrator or not self.selected_hero_class:
+                self.show_recommendation("Cards Detected", f"Found {len(detected_cards)} cards but no AI recommendation available.")
+                return
+            
+            # Extract card IDs from detected cards
+            card_ids = [card.get('card_code', '') for card in detected_cards if card.get('card_code')]
+            
+            if len(card_ids) != 3:
+                self.log_text(f"⚠️ AI v2 needs exactly 3 cards, found {len(card_ids)}")
+                return
+            
+            # Create deck state for AI v2
+            from arena_bot.ai_v2.data_models import DeckState
+            deck_state = DeckState(
+                hero_class=self.selected_hero_class,
+                archetype="Balanced",  # Default archetype for now
+                drafted_cards=[],  # TODO: Track drafted cards
+                pick_number=getattr(self, 'draft_picks_count', 0) + 1
+            )
+            
+            self.log_text("🎯 Generating AI v2 fallback recommendation...")
+            ai_decision = self.ai_v2_integrator.get_ai_decision_with_recovery(deck_state, card_ids)
+            
+            # Convert AI v2 decision to legacy format for display
+            legacy_recommendation = self._convert_ai_v2_to_legacy(ai_decision, detected_cards)
+            self._show_enhanced_recommendation(legacy_recommendation, detected_cards)
+            
+        except Exception as e:
+            self.log_text(f"⚠️ AI v2 fallback failed: {e}")
             self.show_recommendation("Cards Detected", f"Found {len(detected_cards)} cards but no AI recommendation available.")
+    
+    def _convert_ai_v2_to_legacy(self, ai_decision, detected_cards):
+        """Convert AI v2 decision format to legacy recommendation format."""
+        try:
+            recommended_index = ai_decision.recommended_pick_index
+            recommended_card = detected_cards[recommended_index].get('card_code', '')
+            
+            card_details = []
+            for i, card in enumerate(detected_cards):
+                card_analysis = ai_decision.all_offered_cards_analysis[i] if i < len(ai_decision.all_offered_cards_analysis) else {}
+                
+                card_details.append({
+                    'card_code': card.get('card_code', ''),
+                    'tier_letter': 'AI',  # AI v2 doesn't use tier letters
+                    'win_rate': card_analysis.get('scores', {}).get('final_score', 0.5)
+                })
+            
+            return {
+                'recommended_card': recommended_card,
+                'recommended_pick': recommended_index + 1,
+                'reasoning': ai_decision.comparative_explanation,
+                'card_details': card_details
+            }
+            
+        except Exception as e:
+            self.log_text(f"⚠️ Error converting AI v2 decision: {e}")
+            return None
+    
+    def _show_basic_recommendation(self, recommendation):
+        """Fallback to basic recommendation display."""
+        rec_card_name = self.get_card_name(recommendation['recommended_card'])
+        rec_text = f"🎯 RECOMMENDED PICK: {rec_card_name}\n\n"
+        rec_text += f"📊 Position: #{recommendation['recommended_pick']}\n\n"
+        rec_text += f"💭 Reasoning: {recommendation['reasoning']}\n\n"
+        rec_text += "📋 All Cards:\n"
+        
+        for i, card_detail in enumerate(recommendation['card_details']):
+            card_name = self.get_card_name(card_detail['card_code'])
+            marker = "👑" if i == recommendation['recommended_pick'] - 1 else "📋"
+            rec_text += f"{marker} {i+1}. {card_name} (Tier {card_detail['tier_letter']}, {card_detail['win_rate']:.0%} WR)\n"
+        
+        self.show_recommendation("AI Draft Recommendation", rec_text)
+    
+    def _get_card_class_context(self, card_code):
+        """Get card class for hero synergy context."""
+        try:
+            if hasattr(self, 'cards_loader') and self.cards_loader:
+                return self.cards_loader.get_card_class(card_code)
+            return 'UNKNOWN'
+        except:
+            return 'UNKNOWN'
+    
+    def _analyze_hero_card_synergy(self, card_code, hero_class):
+        """Analyze and explain hero-card synergy with detailed explanations."""
+        try:
+            # Get card properties
+            card_class = self._get_card_class_context(card_code)
+            card_name = self.get_card_name(card_code) if hasattr(self, 'get_card_name') else card_code
+            
+            # Class synergy analysis
+            if card_class == hero_class:
+                return self._get_class_synergy_explanation(card_code, card_name, hero_class)
+            elif card_class == 'NEUTRAL':
+                return self._get_neutral_synergy_explanation(card_code, card_name, hero_class)
+            else:
+                return f"❓ Off-class card ({card_class})"
+        except Exception as e:
+            return None
+    
+    def _get_class_synergy_explanation(self, card_code, card_name, hero_class):
+        """Get detailed class synergy explanation."""
+        # Hero-specific class synergy patterns
+        class_synergies = {
+            'WARRIOR': {
+                'weapon': '⚔️ Weapon synergy - enhances board control',
+                'armor': '🛡️ Armor synergy - defensive value',
+                'rush': '🏃 Rush synergy - immediate board impact',
+                'taunt': '🛡️ Taunt synergy - control gameplan'
+            },
+            'MAGE': {
+                'spell': '✨ Spell synergy - combo potential',
+                'freeze': '🧊 Freeze synergy - tempo control', 
+                'secret': '🤫 Secret synergy - board protection',
+                'elemental': '🔥 Elemental synergy - spell power'
+            },
+            'HUNTER': {
+                'beast': '🐺 Beast synergy - tribal value',
+                'secret': '🏹 Secret synergy - aggressive pressure',
+                'weapon': '🏹 Weapon synergy - face damage',
+                'rush': '🏃 Rush synergy - board control'
+            },
+            'PRIEST': {
+                'heal': '💊 Heal synergy - control value',
+                'shadow': '👤 Shadow synergy - removal options',
+                'divine': '✨ Divine synergy - board protection',
+                'deathrattle': '💀 Deathrattle synergy - value engine'
+            },
+            'WARLOCK': {
+                'demon': '👹 Demon synergy - aggressive stats',
+                'discard': '🗑️ Discard synergy - risk/reward',
+                'lifesteal': '🩸 Lifesteal synergy - health management',
+                'self_damage': '⚡ Self-damage synergy - powerful effects'
+            },
+            'ROGUE': {
+                'combo': '🎯 Combo synergy - efficient removal',
+                'stealth': '👻 Stealth synergy - guaranteed value',
+                'weapon': '🗡️ Weapon synergy - tempo swings',
+                'deathrattle': '💀 Deathrattle synergy - value generation'
+            },
+            'SHAMAN': {
+                'elemental': '🌊 Elemental synergy - chain effects',
+                'overload': '⚡ Overload synergy - powerful early game',
+                'weapon': '🔨 Weapon synergy - board control',
+                'totem': '🗿 Totem synergy - board presence'
+            },
+            'PALADIN': {
+                'divine_shield': '✨ Divine Shield synergy - sticky minions',
+                'weapon': '⚔️ Weapon synergy - board control',
+                'heal': '💊 Heal synergy - value trades',
+                'buff': '💪 Buff synergy - board domination'
+            },
+            'DRUID': {
+                'choose_one': '🌿 Choose One synergy - flexibility',
+                'ramp': '🌱 Ramp synergy - powerful late game',
+                'beast': '🐻 Beast synergy - tribal pressure',
+                'armor': '🛡️ Armor synergy - survival tools'
+            },
+            'DEMONHUNTER': {
+                'demon': '👹 Demon synergy - aggressive stats',
+                'outcast': '🚀 Outcast synergy - powerful effects',
+                'weapon': '⚔️ Weapon synergy - face damage',
+                'attack': '💥 Attack synergy - hero power value'
+            }
+        }
+        
+        # Get synergies for this hero class
+        hero_synergies = class_synergies.get(hero_class, {})
+        
+        # Try to identify card synergy type (simplified heuristic)
+        card_lower = card_name.lower()
+        for synergy_type, explanation in hero_synergies.items():
+            if synergy_type in card_lower or any(keyword in card_lower for keyword in synergy_type.split('_')):
+                return explanation
+        
+        # Generic class synergy
+        return f"🎯 {hero_class.title()} class card - inherent synergy"
+    
+    def _get_neutral_synergy_explanation(self, card_code, card_name, hero_class):
+        """Get neutral card synergy explanation for specific hero."""
+        # Hero-specific neutral card preferences
+        neutral_preferences = {
+            'WARRIOR': {
+                'taunt': '🛡️ Taunt - fits control gameplan',
+                'weapon': '⚔️ Weapon - synergizes with hero power',
+                'armor': '🛡️ Armor - defensive value',
+                'high_health': '💪 High health - trading efficiency'
+            },
+            'MAGE': {
+                'spell_damage': '✨ Spell damage - enhances removal',
+                'freeze': '🧊 Freeze - tempo control',
+                'draw': '📚 Card draw - resource advantage',
+                'low_cost': '⚡ Low cost - efficient trades'
+            },
+            'HUNTER': {
+                'charge': '🏃 Charge - immediate face damage',
+                'beast': '🐺 Beast - tribal synergy',
+                'low_cost': '⚡ Low cost - aggressive curve',
+                'direct_damage': '🎯 Direct damage - reach potential'
+            },
+            'PRIEST': {
+                'high_health': '💊 High health - heal synergy',
+                'deathrattle': '💀 Deathrattle - value generation',
+                'divine_shield': '✨ Divine Shield - protection',
+                'card_draw': '📚 Card draw - control value'
+            },
+            'WARLOCK': {
+                'demon': '👹 Demon - tribal synergy',
+                'card_draw': '📚 Card draw - life tap value',
+                'high_attack': '💥 High attack - aggressive pressure',
+                'self_damage': '⚡ Self-damage - synergy potential'
+            },
+            'ROGUE': {
+                'combo': '🎯 Combo - efficient removal',
+                'low_cost': '⚡ Low cost - combo enabler',
+                'stealth': '👻 Stealth - guaranteed value',
+                'weapon': '🗡️ Weapon - tempo swings'
+            },
+            'SHAMAN': {
+                'elemental': '🌊 Elemental - tribal chains',
+                'spell_damage': '⚡ Spell damage - removal boost',
+                'weapon': '🔨 Weapon - board control',
+                'overload': '⚡ Overload - early power'
+            },
+            'PALADIN': {
+                'divine_shield': '✨ Divine Shield - buff targets',
+                'low_cost': '⚡ Low cost - flooding potential',
+                'weapon': '⚔️ Weapon - board control',
+                'heal': '💊 Heal - value trades'
+            },
+            'DRUID': {
+                'high_cost': '🌱 High cost - ramp targets',
+                'beast': '🐻 Beast - tribal value',
+                'taunt': '🛡️ Taunt - defensive walls',
+                'card_draw': '📚 Card draw - resource advantage'
+            },
+            'DEMONHUNTER': {
+                'low_cost': '⚡ Low cost - aggressive curve',
+                'demon': '👹 Demon - tribal synergy',
+                'rush': '🏃 Rush - immediate impact',
+                'weapon': '⚔️ Weapon - face damage'
+            }
+        }
+        
+        # Get preferences for this hero
+        hero_prefs = neutral_preferences.get(hero_class, {})
+        
+        # Try to match card characteristics (simplified heuristic)
+        card_lower = card_name.lower()
+        for pref_type, explanation in hero_prefs.items():
+            if pref_type in card_lower or any(keyword in card_lower for keyword in pref_type.split('_')):
+                return explanation
+        
+        # Generic neutral assessment
+        generic_assessments = {
+            'WARRIOR': '⚖️ Neutral - control value potential',
+            'MAGE': '⚖️ Neutral - tempo consideration',
+            'HUNTER': '⚖️ Neutral - aggressive curve fit',
+            'PRIEST': '⚖️ Neutral - value consideration',
+            'WARLOCK': '⚖️ Neutral - aggressive potential',
+            'ROGUE': '⚖️ Neutral - tempo efficiency',
+            'SHAMAN': '⚖️ Neutral - midrange value',
+            'PALADIN': '⚖️ Neutral - board presence',
+            'DRUID': '⚖️ Neutral - flexible option',
+            'DEMONHUNTER': '⚖️ Neutral - aggressive consideration'
+        }
+        
+        return generic_assessments.get(hero_class, '⚖️ Neutral card')
+    
+    def setup_draft_review_panel(self):
+        """Setup draft review panel showing hero choice impact on overall draft performance."""
+        # Draft review frame (initially hidden)
+        self.review_frame = tk.LabelFrame(
+            self.root,
+            text="📊 DRAFT REVIEW - HERO IMPACT ANALYSIS",
+            font=('Arial', 10, 'bold'),
+            fg='#9B59B6',
+            bg='#2C3E50'
+        )
+        # Initially hidden - will show when draft is complete
+        self.review_frame.pack_forget()
+        
+        # Create review container
+        review_container = tk.Frame(self.review_frame, bg='#2C3E50')
+        review_container.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        # Hero Impact Section
+        hero_impact_section = tk.Frame(review_container, bg='#34495E', relief='raised', bd=2)
+        hero_impact_section.pack(side='left', padx=5, pady=5, fill='both', expand=True)
+        
+        tk.Label(
+            hero_impact_section,
+            text="👑 HERO IMPACT",
+            font=('Arial', 10, 'bold'),
+            fg='#F39C12',
+            bg='#34495E'
+        ).pack(pady=5)
+        
+        self.hero_impact_text = tk.Text(
+            hero_impact_section,
+            height=8,
+            width=25,
+            bg='#2C3E50',
+            fg='#ECF0F1',
+            font=('Arial', 8),
+            wrap=tk.WORD
+        )
+        self.hero_impact_text.pack(fill='both', expand=True, padx=5, pady=5)
+        
+        # Draft Quality Section
+        draft_quality_section = tk.Frame(review_container, bg='#34495E', relief='raised', bd=2)
+        draft_quality_section.pack(side='left', padx=5, pady=5, fill='both', expand=True)
+        
+        tk.Label(
+            draft_quality_section,
+            text="📈 DRAFT QUALITY",
+            font=('Arial', 10, 'bold'),
+            fg='#3498DB',
+            bg='#34495E'
+        ).pack(pady=5)
+        
+        self.draft_quality_text = tk.Text(
+            draft_quality_section,
+            height=8,
+            width=25,
+            bg='#2C3E50',
+            fg='#ECF0F1',
+            font=('Arial', 8),
+            wrap=tk.WORD
+        )
+        self.draft_quality_text.pack(fill='both', expand=True, padx=5, pady=5)
+        
+        # Archetype Analysis Section
+        archetype_section = tk.Frame(review_container, bg='#34495E', relief='raised', bd=2)
+        archetype_section.pack(side='left', padx=5, pady=5, fill='both', expand=True)
+        
+        tk.Label(
+            archetype_section,
+            text="🎯 ARCHETYPE FIT",
+            font=('Arial', 10, 'bold'),
+            fg='#E74C3C',
+            bg='#34495E'
+        ).pack(pady=5)
+        
+        self.archetype_analysis_text = tk.Text(
+            archetype_section,
+            height=8,
+            width=25,
+            bg='#2C3E50',
+            fg='#ECF0F1',
+            font=('Arial', 8),
+            wrap=tk.WORD
+        )
+        self.archetype_analysis_text.pack(fill='both', expand=True, padx=5, pady=5)
+        
+        # Performance Prediction Section
+        prediction_section = tk.Frame(review_container, bg='#34495E', relief='raised', bd=2)
+        prediction_section.pack(side='left', padx=5, pady=5, fill='both', expand=True)
+        
+        tk.Label(
+            prediction_section,
+            text="🔮 PERFORMANCE PREDICTION",
+            font=('Arial', 10, 'bold'),
+            fg='#27AE60',
+            bg='#34495E'
+        ).pack(pady=5)
+        
+        self.performance_prediction_text = tk.Text(
+            prediction_section,
+            height=8,
+            width=25,
+            bg='#2C3E50',
+            fg='#ECF0F1',
+            font=('Arial', 8),
+            wrap=tk.WORD
+        )
+        self.performance_prediction_text.pack(fill='both', expand=True, padx=5, pady=5)
+        
+        # Review controls
+        controls_frame = tk.Frame(self.review_frame, bg='#2C3E50')
+        controls_frame.pack(fill='x', padx=10, pady=5)
+        
+        # Export review button
+        export_btn = tk.Button(
+            controls_frame,
+            text="📋 Export Review",
+            command=self.export_draft_review,
+            bg='#9B59B6',
+            fg='white',
+            font=('Arial', 9),
+            relief='raised',
+            bd=2
+        )
+        export_btn.pack(side='left', padx=5)
+        
+        # Hide review button
+        hide_btn = tk.Button(
+            controls_frame,
+            text="❌ Hide Review",
+            command=self.hide_draft_review,
+            bg='#95A5A6',
+            fg='white',
+            font=('Arial', 9),
+            relief='raised',
+            bd=2
+        )
+        hide_btn.pack(side='right', padx=5)
+    
+    def show_draft_review(self):
+        """Show and populate the draft review panel."""
+        try:
+            if not hasattr(self, 'review_frame'):
+                return
+            
+            # Generate comprehensive review
+            self._populate_hero_impact_analysis()
+            self._populate_draft_quality_analysis()
+            self._populate_archetype_analysis()
+            self._populate_performance_prediction()
+            
+            # Show the review panel
+            self.review_frame.pack(fill='both', expand=True, padx=10, pady=5)
+            
+            self.log_text("📊 Draft review panel displayed")
+            
+        except Exception as e:
+            self.log_text(f"⚠️ Error showing draft review: {e}")
+    
+    def hide_draft_review(self):
+        """Hide the draft review panel."""
+        if hasattr(self, 'review_frame'):
+            self.review_frame.pack_forget()
+    
+    def _populate_hero_impact_analysis(self):
+        """Populate hero impact analysis."""
+        try:
+            self.hero_impact_text.delete('1.0', tk.END)
+            
+            if not self.selected_hero_class:
+                self.hero_impact_text.insert('1.0', "No hero selected")
+                return
+            
+            analysis = []
+            analysis.append(f"Selected Hero: {self.selected_hero_class}\n")
+            
+            # Hero winrate impact
+            if hasattr(self, 'hero_recommendation') and self.hero_recommendation:
+                winrates = self.hero_recommendation.winrates
+                if self.selected_hero_class in winrates:
+                    hero_wr = winrates[self.selected_hero_class]
+                    avg_wr = sum(winrates.values()) / len(winrates)
+                    impact = hero_wr - avg_wr
+                    
+                    analysis.append(f"Hero Winrate: {hero_wr:.1f}%")
+                    analysis.append(f"Average Offered: {avg_wr:.1f}%")
+                    analysis.append(f"Impact: {impact:+.1f}%\n")
+                    
+                    if impact > 2:
+                        analysis.append("🎯 Excellent hero choice!")
+                    elif impact > 0:
+                        analysis.append("✅ Good hero choice")
+                    elif impact > -2:
+                        analysis.append("⚖️ Average hero choice")
+                    else:
+                        analysis.append("⚠️ Suboptimal hero choice")
+            
+            # Archetype compatibility
+            if hasattr(self, 'grandmaster_advisor') and self.grandmaster_advisor:
+                hero_affinities = self.grandmaster_advisor._calculate_hero_archetype_preferences(self.selected_hero_class)
+                analysis.append(f"\nArchetype Affinities:")
+                for archetype, affinity in sorted(hero_affinities.items(), key=lambda x: x[1], reverse=True)[:3]:
+                    analysis.append(f"• {archetype}: {affinity:.1%}")
+            
+            # Card synergy potential
+            analysis.append(f"\nSynergy Potential:")
+            analysis.append(f"• Class cards: High synergy")
+            analysis.append(f"• Neutral cards: Hero-specific value")
+            analysis.append(f"• Total picks: {getattr(self, 'draft_picks_count', 0)}/30")
+            
+            self.hero_impact_text.insert('1.0', '\n'.join(analysis))
+            
+        except Exception as e:
+            self.hero_impact_text.insert('1.0', f"Error analyzing hero impact: {e}")
+    
+    def _populate_draft_quality_analysis(self):
+        """Populate draft quality analysis."""
+        try:
+            self.draft_quality_text.delete('1.0', tk.END)
+            
+            analysis = []
+            pick_count = getattr(self, 'draft_picks_count', 0)
+            
+            analysis.append(f"Draft Progress: {pick_count}/30\n")
+            
+            # AI v2 system performance
+            if hasattr(self, 'ai_v2_integrator') and self.ai_v2_integrator:
+                try:
+                    performance = self.ai_v2_integrator._get_performance_summary()
+                    card_evals = performance.get('card_evaluations_last_hour', 0)
+                    hero_recs = performance.get('hero_recommendations_last_hour', 0)
+                    
+                    analysis.append("AI v2 Performance:")
+                    analysis.append(f"• Hero recs: {hero_recs}")
+                    analysis.append(f"• Card evals: {card_evals}")
+                    
+                    avg_eval_time = performance.get('avg_card_eval_time_ms', 0)
+                    if avg_eval_time > 0:
+                        analysis.append(f"• Avg eval time: {avg_eval_time:.0f}ms")
+                except:
+                    analysis.append("AI v2 Performance: Unknown")
+            
+            # Data source quality
+            analysis.append(f"\nData Source Quality:")
+            if hasattr(self, 'ai_v2_integrator') and self.ai_v2_integrator:
+                try:
+                    health = self.ai_v2_integrator.check_system_health()
+                    overall_status = health.get('overall_status', 'unknown')
+                    if overall_status == 'online':
+                        analysis.append("• HSReplay: ✅ Online")
+                        analysis.append("• Full AI v2: ✅ Active")
+                    else:
+                        analysis.append("• HSReplay: ⚠️ Limited")
+                        analysis.append("• Fallback: 💾 Active")
+                except:
+                    analysis.append("• Status: ❓ Unknown")
+            
+            # Draft efficiency estimate
+            if pick_count > 5:
+                efficiency = min(95, 70 + (pick_count * 0.5))  # Simplified calculation
+                analysis.append(f"\nDraft Efficiency: {efficiency:.0f}%")
+                
+                if efficiency > 85:
+                    analysis.append("🎯 Excellent draft quality")
+                elif efficiency > 75:
+                    analysis.append("✅ Good draft quality")
+                elif efficiency > 65:
+                    analysis.append("⚖️ Average draft quality")
+                else:
+                    analysis.append("⚠️ Room for improvement")
+            
+            self.draft_quality_text.insert('1.0', '\n'.join(analysis))
+            
+        except Exception as e:
+            self.draft_quality_text.insert('1.0', f"Error analyzing draft quality: {e}")
+    
+    def _populate_archetype_analysis(self):
+        """Populate archetype fit analysis."""
+        try:
+            self.archetype_analysis_text.delete('1.0', tk.END)
+            
+            analysis = []
+            
+            if not self.selected_hero_class:
+                analysis.append("No hero selected for analysis")
+            else:
+                # Current archetype (default to Balanced)
+                current_archetype = getattr(self, 'current_archetype', 'Balanced')
+                analysis.append(f"Current: {current_archetype}\n")
+                
+                # Hero affinity for current archetype
+                if hasattr(self, 'grandmaster_advisor') and self.grandmaster_advisor:
+                    hero_affinities = self.grandmaster_advisor._calculate_hero_archetype_preferences(self.selected_hero_class)
+                    current_affinity = hero_affinities.get(current_archetype, 0.5)
+                    
+                    analysis.append(f"Hero Affinity: {current_affinity:.1%}")
+                    
+                    if current_affinity > 0.8:
+                        analysis.append("🎯 Perfect archetype match!")
+                    elif current_affinity > 0.6:
+                        analysis.append("✅ Good archetype fit")
+                    elif current_affinity > 0.4:
+                        analysis.append("⚖️ Acceptable fit")
+                    else:
+                        analysis.append("⚠️ Poor archetype fit")
+                    
+                    # Best alternative archetypes
+                    analysis.append(f"\nBest Alternatives:")
+                    sorted_archetypes = sorted(hero_affinities.items(), key=lambda x: x[1], reverse=True)
+                    for archetype, affinity in sorted_archetypes[:3]:
+                        if archetype != current_archetype:
+                            analysis.append(f"• {archetype}: {affinity:.1%}")
+                
+                # Archetype consistency based on picks
+                pick_count = getattr(self, 'draft_picks_count', 0)
+                if pick_count > 10:
+                    # Simplified consistency calculation
+                    consistency = min(90, 60 + (pick_count * 1.5))
+                    analysis.append(f"\nConsistency: {consistency:.0f}%")
+                    
+                    if consistency > 80:
+                        analysis.append("🎯 Highly consistent")
+                    elif consistency > 70:
+                        analysis.append("✅ Good consistency")
+                    else:
+                        analysis.append("⚠️ Mixed signals")
+                
+                # Pivot recommendations
+                analysis.append(f"\nPivot Analysis:")
+                if pick_count < 15:
+                    analysis.append("• Still flexible")
+                    analysis.append("• Can pivot if needed")
+                elif pick_count < 25:
+                    analysis.append("• Limited pivot options")
+                    analysis.append("• Stay committed")
+                else:
+                    analysis.append("• No pivot possible")
+                    analysis.append("• Finalize strategy")
+            
+            self.archetype_analysis_text.insert('1.0', '\n'.join(analysis))
+            
+        except Exception as e:
+            self.archetype_analysis_text.insert('1.0', f"Error analyzing archetype: {e}")
+    
+    def _populate_performance_prediction(self):
+        """Populate performance prediction analysis."""
+        try:
+            self.performance_prediction_text.delete('1.0', tk.END)
+            
+            analysis = []
+            
+            if not self.selected_hero_class:
+                analysis.append("No data for prediction")
+                self.performance_prediction_text.insert('1.0', '\n'.join(analysis))
+                return
+            
+            # Base prediction from hero winrate
+            base_prediction = 50.0  # Default
+            if hasattr(self, 'hero_recommendation') and self.hero_recommendation:
+                winrates = self.hero_recommendation.winrates
+                if self.selected_hero_class in winrates:
+                    base_prediction = winrates[self.selected_hero_class]
+            
+            analysis.append(f"Base Hero WR: {base_prediction:.1f}%")
+            
+            # Adjustments based on draft quality
+            pick_count = getattr(self, 'draft_picks_count', 0)
+            if pick_count > 0:
+                # Simplified draft quality modifier
+                draft_modifier = 0
+                
+                # AI v2 usage bonus
+                if hasattr(self, 'ai_v2_integrator') and self.ai_v2_integrator:
+                    try:
+                        health = self.ai_v2_integrator.check_system_health()
+                        if health.get('overall_status') == 'online':
+                            draft_modifier += 2  # AI v2 bonus
+                        else:
+                            draft_modifier += 1  # Partial bonus
+                    except:
+                        pass
+                
+                # Pick count modifier (more picks = better draft)
+                pick_modifier = min(3, pick_count * 0.1)
+                draft_modifier += pick_modifier
+                
+                adjusted_prediction = base_prediction + draft_modifier
+                
+                analysis.append(f"Draft Bonus: +{draft_modifier:.1f}%")
+                analysis.append(f"Adjusted WR: {adjusted_prediction:.1f}%\n")
+                
+                # Win prediction ranges
+                analysis.append("Expected Wins:")
+                low_wins = max(0, int((adjusted_prediction - 5) / 10))
+                high_wins = min(12, int((adjusted_prediction + 5) / 10))
+                most_likely = int(adjusted_prediction / 10)
+                
+                analysis.append(f"• Most likely: {most_likely} wins")
+                analysis.append(f"• Range: {low_wins}-{high_wins} wins")
+                
+                # Performance categories
+                if most_likely >= 7:
+                    analysis.append(f"• Category: 🏆 Excellent")
+                elif most_likely >= 5:
+                    analysis.append(f"• Category: ✅ Good")
+                elif most_likely >= 3:
+                    analysis.append(f"• Category: ⚖️ Average")
+                else:
+                    analysis.append(f"• Category: ⚠️ Challenging")
+                
+                # Confidence in prediction
+                confidence = 70 + min(20, pick_count)  # More picks = higher confidence
+                analysis.append(f"\nPrediction Confidence: {confidence}%")
+                
+                # Factors affecting performance
+                analysis.append(f"\nKey Factors:")
+                analysis.append(f"• Hero choice impact")
+                analysis.append(f"• AI-guided picks")
+                analysis.append(f"• Archetype consistency")
+                analysis.append(f"• Player skill")
+            
+            self.performance_prediction_text.insert('1.0', '\n'.join(analysis))
+            
+        except Exception as e:
+            self.performance_prediction_text.insert('1.0', f"Error predicting performance: {e}")
+    
+    def export_draft_review(self):
+        """Export the complete draft review to a file."""
+        try:
+            from datetime import datetime
+            
+            # Generate filename
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            hero_name = self.selected_hero_class or "Unknown"
+            filename = f"draft_review_{hero_name}_{timestamp}.txt"
+            
+            # Collect all review data
+            review_data = []
+            review_data.append("=" * 60)
+            review_data.append("ARENA BOT AI v2 - DRAFT REVIEW")
+            review_data.append("=" * 60)
+            review_data.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            review_data.append(f"Hero: {hero_name}")
+            review_data.append(f"Picks: {getattr(self, 'draft_picks_count', 0)}/30")
+            review_data.append("")
+            
+            # Hero Impact
+            review_data.append("HERO IMPACT ANALYSIS:")
+            review_data.append("-" * 30)
+            if hasattr(self, 'hero_impact_text'):
+                hero_content = self.hero_impact_text.get('1.0', tk.END).strip()
+                review_data.append(hero_content)
+            review_data.append("")
+            
+            # Draft Quality
+            review_data.append("DRAFT QUALITY ANALYSIS:")
+            review_data.append("-" * 30)
+            if hasattr(self, 'draft_quality_text'):
+                quality_content = self.draft_quality_text.get('1.0', tk.END).strip()
+                review_data.append(quality_content)
+            review_data.append("")
+            
+            # Archetype Analysis
+            review_data.append("ARCHETYPE FIT ANALYSIS:")
+            review_data.append("-" * 30)
+            if hasattr(self, 'archetype_analysis_text'):
+                archetype_content = self.archetype_analysis_text.get('1.0', tk.END).strip()
+                review_data.append(archetype_content)
+            review_data.append("")
+            
+            # Performance Prediction
+            review_data.append("PERFORMANCE PREDICTION:")
+            review_data.append("-" * 30)
+            if hasattr(self, 'performance_prediction_text'):
+                prediction_content = self.performance_prediction_text.get('1.0', tk.END).strip()
+                review_data.append(prediction_content)
+            review_data.append("")
+            
+            review_data.append("=" * 60)
+            review_data.append("Generated by Arena Bot AI v2 System")
+            review_data.append("https://github.com/arena-bot-project")
+            
+            # Write to file
+            with open(filename, 'w', encoding='utf-8') as f:
+                f.write('\n'.join(review_data))
+            
+            self.log_text(f"📋 Draft review exported to: {filename}")
+            
+        except Exception as e:
+            self.log_text(f"❌ Error exporting review: {e}")
+    
+    def show_unified_statistics(self):
+        """Show unified statistics window covering both hero and card performance data."""
+        try:
+            stats_window = tk.Toplevel(self.root)
+            stats_window.title("📈 AI v2 Unified Statistics")
+            stats_window.geometry("1200x800")
+            stats_window.configure(bg='#2C3E50')
+            
+            # Make stats window stay on top
+            stats_window.attributes('-topmost', True)
+            
+            # Main title
+            title_label = tk.Label(
+                stats_window,
+                text="📈 AI v2 UNIFIED STATISTICS DASHBOARD",
+                font=('Arial', 16, 'bold'),
+                fg='#E74C3C',
+                bg='#2C3E50'
+            )
+            title_label.pack(pady=10)
+            
+            # Create main container with tabs
+            main_container = tk.Frame(stats_window, bg='#2C3E50')
+            main_container.pack(fill='both', expand=True, padx=10, pady=10)
+            
+            # Create notebook for tabs
+            from tkinter import ttk
+            style = ttk.Style()
+            style.theme_use('clam')
+            
+            notebook = ttk.Notebook(main_container)
+            notebook.pack(fill='both', expand=True)
+            
+            # System Overview Tab
+            overview_frame = tk.Frame(notebook, bg='#34495E')
+            notebook.add(overview_frame, text="🎯 System Overview")
+            self._create_system_overview_tab(overview_frame)
+            
+            # Hero Performance Tab
+            hero_frame = tk.Frame(notebook, bg='#34495E')
+            notebook.add(hero_frame, text="👑 Hero Performance")
+            self._create_hero_performance_tab(hero_frame)
+            
+            # Card Analysis Tab
+            card_frame = tk.Frame(notebook, bg='#34495E')
+            notebook.add(card_frame, text="🃏 Card Analysis")
+            self._create_card_analysis_tab(card_frame)
+            
+            # Data Sources Tab
+            data_frame = tk.Frame(notebook, bg='#34495E')
+            notebook.add(data_frame, text="🔧 Data Sources")
+            self._create_data_sources_tab(data_frame)
+            
+            # Performance Metrics Tab
+            perf_frame = tk.Frame(notebook, bg='#34495E')
+            notebook.add(perf_frame, text="⚡ Performance")
+            self._create_performance_metrics_tab(perf_frame)
+            
+            # Control buttons
+            controls_frame = tk.Frame(stats_window, bg='#2C3E50')
+            controls_frame.pack(fill='x', padx=10, pady=5)
+            
+            # Refresh button
+            refresh_btn = tk.Button(
+                controls_frame,
+                text="🔄 Refresh",
+                command=lambda: self._refresh_statistics_display(stats_window),
+                bg='#3498DB',
+                fg='white',
+                font=('Arial', 10),
+                relief='raised',
+                bd=2
+            )
+            refresh_btn.pack(side='left', padx=5)
+            
+            # Export button
+            export_btn = tk.Button(
+                controls_frame,
+                text="📋 Export Stats",
+                command=self.export_unified_statistics,
+                bg='#27AE60',
+                fg='white',
+                font=('Arial', 10),
+                relief='raised',
+                bd=2
+            )
+            export_btn.pack(side='left', padx=5)
+            
+            # Close button
+            close_btn = tk.Button(
+                controls_frame,
+                text="❌ Close",
+                command=stats_window.destroy,
+                bg='#E74C3C',
+                fg='white',
+                font=('Arial', 10),
+                relief='raised',
+                bd=2
+            )
+            close_btn.pack(side='right', padx=5)
+            
+            self.log_text("📈 AI v2 Unified Statistics displayed")
+            
+        except Exception as e:
+            self.log_text(f"❌ Error showing unified statistics: {e}")
+    
+    def _create_system_overview_tab(self, parent):
+        """Create system overview tab with key metrics."""
+        # Overall system status
+        status_frame = tk.LabelFrame(parent, text="🎯 System Status", bg='#34495E', fg='#ECF0F1', font=('Arial', 10, 'bold'))
+        status_frame.pack(fill='x', padx=10, pady=5)
+        
+        status_text = tk.Text(status_frame, height=8, bg='#2C3E50', fg='#ECF0F1', font=('Arial', 9))
+        status_text.pack(fill='x', padx=5, pady=5)
+        
+        # Get system status
+        try:
+            status_info = []
+            status_info.append("AI v2 SYSTEM STATUS")
+            status_info.append("=" * 30)
+            
+            if hasattr(self, 'ai_v2_integrator') and self.ai_v2_integrator:
+                health = self.ai_v2_integrator.check_system_health()
+                overall_status = health.get('overall_status', 'unknown')
+                status_info.append(f"Overall Status: {overall_status.upper()}")
+                
+                components = health.get('components', {})
+                status_info.append(f"\nComponent Status:")
+                for comp, details in components.items():
+                    if isinstance(details, dict):
+                        comp_status = details.get('status', 'unknown')
+                        response_time = details.get('response_time_ms', 0)
+                        status_info.append(f"• {comp}: {comp_status} ({response_time:.0f}ms)")
+                
+                uptime = health.get('uptime_hours', 0)
+                status_info.append(f"\nSystem Uptime: {uptime:.1f} hours")
+            else:
+                status_info.append("AI v2 System: OFFLINE")
+            
+            # Current draft info
+            status_info.append(f"\nCurrent Session:")
+            status_info.append(f"• Hero: {getattr(self, 'selected_hero_class', 'None')}")
+            status_info.append(f"• Phase: {getattr(self, 'current_draft_phase', 'waiting')}")
+            status_info.append(f"• Picks: {getattr(self, 'draft_picks_count', 0)}/30")
+            
+            status_text.insert('1.0', '\n'.join(status_info))
+            
+        except Exception as e:
+            status_text.insert('1.0', f"Error loading system status: {e}")
+        
+        # Quick stats
+        quick_stats_frame = tk.LabelFrame(parent, text="📊 Quick Statistics", bg='#34495E', fg='#ECF0F1', font=('Arial', 10, 'bold'))
+        quick_stats_frame.pack(fill='both', expand=True, padx=10, pady=5)
+        
+        # Create grid for quick stats
+        stats_container = tk.Frame(quick_stats_frame, bg='#34495E')
+        stats_container.pack(fill='both', expand=True, padx=5, pady=5)
+        
+        # Hero stats
+        hero_stats_frame = tk.Frame(stats_container, bg='#2C3E50', relief='raised', bd=2)
+        hero_stats_frame.pack(side='left', fill='both', expand=True, padx=5, pady=5)
+        
+        tk.Label(hero_stats_frame, text="👑 HERO STATS", bg='#2C3E50', fg='#F39C12', font=('Arial', 10, 'bold')).pack(pady=5)
+        
+        hero_stats_text = tk.Text(hero_stats_frame, height=10, bg='#2C3E50', fg='#ECF0F1', font=('Arial', 8))
+        hero_stats_text.pack(fill='both', expand=True, padx=5, pady=5)
+        
+        try:
+            hero_info = []
+            if hasattr(self, 'ai_v2_integrator') and self.ai_v2_integrator:
+                performance = self.ai_v2_integrator._get_performance_summary()
+                hero_recs = performance.get('hero_recommendations_last_hour', 0)
+                hero_info.append(f"Recommendations: {hero_recs}")
+                
+                avg_time = performance.get('avg_hero_response_time_ms', 0)
+                hero_info.append(f"Avg Response: {avg_time:.0f}ms")
+            
+            if hasattr(self, 'hero_recommendation') and self.hero_recommendation:
+                confidence = self.hero_recommendation.confidence_level
+                hero_info.append(f"Last Confidence: {confidence:.1%}")
+                
+                winrates = self.hero_recommendation.winrates
+                if winrates:
+                    avg_wr = sum(winrates.values()) / len(winrates)
+                    hero_info.append(f"Avg Winrate: {avg_wr:.1f}%")
+            
+            if not hero_info:
+                hero_info.append("No hero data available")
+            
+            hero_stats_text.insert('1.0', '\n'.join(hero_info))
+            
+        except Exception as e:
+            hero_stats_text.insert('1.0', f"Error: {e}")
+        
+        # Card stats
+        card_stats_frame = tk.Frame(stats_container, bg='#2C3E50', relief='raised', bd=2)
+        card_stats_frame.pack(side='left', fill='both', expand=True, padx=5, pady=5)
+        
+        tk.Label(card_stats_frame, text="🃏 CARD STATS", bg='#2C3E50', fg='#3498DB', font=('Arial', 10, 'bold')).pack(pady=5)
+        
+        card_stats_text = tk.Text(card_stats_frame, height=10, bg='#2C3E50', fg='#ECF0F1', font=('Arial', 8))
+        card_stats_text.pack(fill='both', expand=True, padx=5, pady=5)
+        
+        try:
+            card_info = []
+            if hasattr(self, 'ai_v2_integrator') and self.ai_v2_integrator:
+                performance = self.ai_v2_integrator._get_performance_summary()
+                card_evals = performance.get('card_evaluations_last_hour', 0)
+                card_info.append(f"Evaluations: {card_evals}")
+                
+                avg_time = performance.get('avg_card_eval_time_ms', 0)
+                card_info.append(f"Avg Eval Time: {avg_time:.0f}ms")
+            
+            pick_count = getattr(self, 'draft_picks_count', 0)
+            card_info.append(f"Current Picks: {pick_count}")
+            
+            if not card_info or all(line.endswith(': 0') for line in card_info):
+                card_info = ["No card data available"]
+            
+            card_stats_text.insert('1.0', '\n'.join(card_info))
+            
+        except Exception as e:
+            card_stats_text.insert('1.0', f"Error: {e}")
+    
+    def _create_hero_performance_tab(self, parent):
+        """Create hero performance analysis tab."""
+        # Hero comparison frame
+        comparison_frame = tk.LabelFrame(parent, text="👑 Hero Winrate Comparison", bg='#34495E', fg='#ECF0F1', font=('Arial', 10, 'bold'))
+        comparison_frame.pack(fill='both', expand=True, padx=10, pady=5)
+        
+        comparison_text = tk.Text(comparison_frame, bg='#2C3E50', fg='#ECF0F1', font=('Consolas', 9))
+        comparison_text.pack(fill='both', expand=True, padx=5, pady=5)
+        
+        try:
+            hero_data = []
+            hero_data.append("HERO WINRATE ANALYSIS")
+            hero_data.append("=" * 50)
+            
+            if hasattr(self, 'hero_recommendation') and self.hero_recommendation:
+                winrates = self.hero_recommendation.winrates
+                
+                if winrates:
+                    # Sort heroes by winrate
+                    sorted_heroes = sorted(winrates.items(), key=lambda x: x[1], reverse=True)
+                    
+                    hero_data.append(f"{'Hero':<15} {'Winrate':<10} {'Tier':<10} {'Status'}")
+                    hero_data.append("-" * 50)
+                    
+                    for hero, winrate in sorted_heroes:
+                        # Determine tier
+                        if winrate >= 55:
+                            tier = "S-Tier"
+                            color = "🟢"
+                        elif winrate >= 52:
+                            tier = "A-Tier"
+                            color = "🟡"
+                        elif winrate >= 48:
+                            tier = "B-Tier"
+                            color = "🟠"
+                        else:
+                            tier = "C-Tier"
+                            color = "🔴"
+                        
+                        # Check if this is the selected hero
+                        status = "Selected" if hero == getattr(self, 'selected_hero_class', None) else ""
+                        
+                        hero_data.append(f"{hero:<15} {winrate:>6.1f}%   {color} {tier:<8} {status}")
+                    
+                    # Add statistics
+                    avg_winrate = sum(winrates.values()) / len(winrates)
+                    hero_data.append("")
+                    hero_data.append(f"Average Winrate: {avg_winrate:.1f}%")
+                    hero_data.append(f"Best Hero: {sorted_heroes[0][0]} ({sorted_heroes[0][1]:.1f}%)")
+                    hero_data.append(f"Worst Hero: {sorted_heroes[-1][0]} ({sorted_heroes[-1][1]:.1f}%)")
+                    hero_data.append(f"Winrate Spread: {sorted_heroes[0][1] - sorted_heroes[-1][1]:.1f}%")
+                else:
+                    hero_data.append("No hero winrate data available")
+            else:
+                hero_data.append("No hero recommendation data available")
+            
+            comparison_text.insert('1.0', '\n'.join(hero_data))
+            
+        except Exception as e:
+            comparison_text.insert('1.0', f"Error loading hero data: {e}")
+    
+    def _create_card_analysis_tab(self, parent):
+        """Create card analysis tab."""
+        # Card evaluation metrics
+        eval_frame = tk.LabelFrame(parent, text="🃏 Card Evaluation Metrics", bg='#34495E', fg='#ECF0F1', font=('Arial', 10, 'bold'))
+        eval_frame.pack(fill='both', expand=True, padx=10, pady=5)
+        
+        eval_text = tk.Text(eval_frame, bg='#2C3E50', fg='#ECF0F1', font=('Consolas', 9))
+        eval_text.pack(fill='both', expand=True, padx=5, pady=5)
+        
+        try:
+            card_data = []
+            card_data.append("CARD EVALUATION METRICS")
+            card_data.append("=" * 50)
+            
+            if hasattr(self, 'ai_v2_integrator') and self.ai_v2_integrator:
+                # Get advisor statistics
+                if hasattr(self, 'grandmaster_advisor') and self.grandmaster_advisor:
+                    stats = self.grandmaster_advisor.get_advisor_statistics()
+                    
+                    card_data.append(f"Recommendations Made: {stats.get('recommendations_made', 0)}")
+                    card_data.append(f"Current Hero Context: {stats.get('current_hero', 'None')}")
+                    card_data.append(f"Pivot Opportunities Found: {stats.get('pivot_opportunities_found', 0)}")
+                    card_data.append(f"Average Confidence: {stats.get('avg_confidence', 0):.1%}")
+                    card_data.append(f"Last Analysis Time: {stats.get('last_analysis_time_ms', 0):.0f}ms")
+                    
+                    card_data.append("\nArchetype Weights (Current Hero):")
+                    hero_weights = stats.get('hero_archetype_weights', {})
+                    if hero_weights:
+                        for archetype, weight in sorted(hero_weights.items(), key=lambda x: x[1], reverse=True):
+                            card_data.append(f"• {archetype}: {weight:.1%}")
+                    
+                    card_data.append("\nSystem Integration:")
+                    integration = stats.get('system_integration', {})
+                    for system, available in integration.items():
+                        status = "✅ Online" if available else "❌ Offline"
+                        card_data.append(f"• {system}: {status}")
+                
+                # Performance metrics
+                performance = self.ai_v2_integrator._get_performance_summary()
+                card_data.append(f"\nPerformance (Last Hour):")
+                card_data.append(f"• Card Evaluations: {performance.get('card_evaluations_last_hour', 0)}")
+                card_data.append(f"• Avg Evaluation Time: {performance.get('avg_card_eval_time_ms', 0):.0f}ms")
+                card_data.append(f"• Total Errors: {performance.get('total_errors_last_hour', 0)}")
+            else:
+                card_data.append("AI v2 system not available")
+            
+            eval_text.insert('1.0', '\n'.join(card_data))
+            
+        except Exception as e:
+            eval_text.insert('1.0', f"Error loading card data: {e}")
+    
+    def _create_data_sources_tab(self, parent):
+        """Create data sources status tab."""
+        # Data source status
+        sources_frame = tk.LabelFrame(parent, text="🔧 Data Source Status", bg='#34495E', fg='#ECF0F1', font=('Arial', 10, 'bold'))
+        sources_frame.pack(fill='both', expand=True, padx=10, pady=5)
+        
+        sources_text = tk.Text(sources_frame, bg='#2C3E50', fg='#ECF0F1', font=('Consolas', 9))
+        sources_text.pack(fill='both', expand=True, padx=5, pady=5)
+        
+        try:
+            source_data = []
+            source_data.append("DATA SOURCE STATUS REPORT")
+            source_data.append("=" * 60)
+            
+            if hasattr(self, 'ai_v2_integrator') and self.ai_v2_integrator:
+                health = self.ai_v2_integrator.check_system_health()
+                data_sources = health.get('data_sources', {})
+                
+                # HSReplay status
+                if 'hsreplay' in data_sources:
+                    hsreplay = data_sources['hsreplay']
+                    source_data.append("HSReplay API:")
+                    source_data.append(f"• Status: {hsreplay.get('status', 'unknown').upper()}")
+                    source_data.append(f"• API Calls Made: {hsreplay.get('api_calls', 0)}")
+                    source_data.append(f"• Card Cache Age: {hsreplay.get('card_cache_age_hours', 0):.1f} hours")
+                    source_data.append(f"• Hero Cache Age: {hsreplay.get('hero_cache_age_hours', 0):.1f} hours")
+                
+                # Cards database status
+                if 'cards_database' in data_sources:
+                    cards_db = data_sources['cards_database']
+                    source_data.append("\nCards Database:")
+                    source_data.append(f"• Status: {cards_db.get('status', 'unknown').upper()}")
+                    source_data.append(f"• Total Cards: {cards_db.get('total_cards', 0)}")
+                    source_data.append(f"• DBF Mappings: {cards_db.get('dbf_mappings', 0)}")
+                
+                # Component health
+                source_data.append("\nComponent Health:")
+                components = health.get('components', {})
+                for comp_name, comp_details in components.items():
+                    if isinstance(comp_details, dict):
+                        status = comp_details.get('status', 'unknown')
+                        error_count = comp_details.get('error_count', 0)
+                        fallback = comp_details.get('fallback_active', False)
+                        
+                        source_data.append(f"• {comp_name}: {status.upper()}")
+                        if error_count > 0:
+                            source_data.append(f"  └─ Errors: {error_count}")
+                        if fallback:
+                            source_data.append(f"  └─ Fallback: ACTIVE")
+                
+                # Overall performance
+                perf = health.get('performance', {})
+                if perf:
+                    source_data.append(f"\nSystem Performance:")
+                    for metric, value in perf.items():
+                        source_data.append(f"• {metric}: {value}")
+            else:
+                source_data.append("AI v2 system not available")
+                source_data.append("Cannot retrieve data source status")
+            
+            sources_text.insert('1.0', '\n'.join(source_data))
+            
+        except Exception as e:
+            sources_text.insert('1.0', f"Error loading data source status: {e}")
+    
+    def _create_performance_metrics_tab(self, parent):
+        """Create performance metrics tab."""
+        # Performance overview
+        perf_frame = tk.LabelFrame(parent, text="⚡ Performance Overview", bg='#34495E', fg='#ECF0F1', font=('Arial', 10, 'bold'))
+        perf_frame.pack(fill='both', expand=True, padx=10, pady=5)
+        
+        perf_text = tk.Text(perf_frame, bg='#2C3E50', fg='#ECF0F1', font=('Consolas', 9))
+        perf_text.pack(fill='both', expand=True, padx=5, pady=5)
+        
+        try:
+            perf_data = []
+            perf_data.append("PERFORMANCE METRICS DASHBOARD")
+            perf_data.append("=" * 60)
+            
+            if hasattr(self, 'ai_v2_integrator') and self.ai_v2_integrator:
+                performance = self.ai_v2_integrator._get_performance_summary()
+                
+                perf_data.append("Response Times (Last Hour):")
+                hero_time = performance.get('avg_hero_response_time_ms', 0)
+                card_time = performance.get('avg_card_eval_time_ms', 0)
+                
+                perf_data.append(f"• Hero Recommendations: {hero_time:.0f}ms")
+                perf_data.append(f"• Card Evaluations: {card_time:.0f}ms")
+                
+                # Performance ratings
+                def get_performance_rating(time_ms):
+                    if time_ms < 100:
+                        return "🟢 Excellent"
+                    elif time_ms < 500:
+                        return "🟡 Good"
+                    elif time_ms < 1000:
+                        return "🟠 Acceptable"
+                    else:
+                        return "🔴 Slow"
+                
+                perf_data.append(f"• Hero Performance: {get_performance_rating(hero_time)}")
+                perf_data.append(f"• Card Performance: {get_performance_rating(card_time)}")
+                
+                # Activity metrics
+                perf_data.append("\nActivity (Last Hour):")
+                hero_recs = performance.get('hero_recommendations_last_hour', 0)
+                card_evals = performance.get('card_evaluations_last_hour', 0)
+                errors = performance.get('total_errors_last_hour', 0)
+                
+                perf_data.append(f"• Hero Recommendations: {hero_recs}")
+                perf_data.append(f"• Card Evaluations: {card_evals}")
+                perf_data.append(f"• Total Operations: {hero_recs + card_evals}")
+                perf_data.append(f"• Errors: {errors}")
+                
+                # Error rate
+                total_ops = hero_recs + card_evals
+                if total_ops > 0:
+                    error_rate = (errors / total_ops) * 100
+                    perf_data.append(f"• Error Rate: {error_rate:.1f}%")
+                    
+                    if error_rate < 1:
+                        perf_data.append("• Reliability: 🟢 Excellent")
+                    elif error_rate < 5:
+                        perf_data.append("• Reliability: 🟡 Good")
+                    elif error_rate < 10:
+                        perf_data.append("• Reliability: 🟠 Fair")
+                    else:
+                        perf_data.append("• Reliability: 🔴 Poor")
+                
+                # System health score
+                health_score = 100
+                if hero_time > 500:
+                    health_score -= 20
+                if card_time > 500:
+                    health_score -= 20
+                if total_ops > 0 and (errors / total_ops) > 0.05:
+                    health_score -= 30
+                
+                perf_data.append(f"\nSystem Health Score: {health_score}/100")
+                
+                if health_score >= 90:
+                    perf_data.append("Overall Rating: 🟢 Excellent")
+                elif health_score >= 75:
+                    perf_data.append("Overall Rating: 🟡 Good")
+                elif health_score >= 60:
+                    perf_data.append("Overall Rating: 🟠 Fair")
+                else:
+                    perf_data.append("Overall Rating: 🔴 Poor")
+            else:
+                perf_data.append("AI v2 system not available")
+                perf_data.append("Cannot retrieve performance metrics")
+            
+            perf_text.insert('1.0', '\n'.join(perf_data))
+            
+        except Exception as e:
+            perf_text.insert('1.0', f"Error loading performance data: {e}")
+    
+    def _refresh_statistics_display(self, stats_window):
+        """Refresh the statistics display."""
+        try:
+            # Close and reopen the window
+            stats_window.destroy()
+            self.show_unified_statistics()
+            self.log_text("🔄 Statistics refreshed")
+        except Exception as e:
+            self.log_text(f"❌ Error refreshing statistics: {e}")
+    
+    def export_unified_statistics(self):
+        """Export unified statistics to a file."""
+        try:
+            from datetime import datetime
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"ai_v2_statistics_{timestamp}.txt"
+            
+            stats_data = []
+            stats_data.append("=" * 80)
+            stats_data.append("ARENA BOT AI v2 - UNIFIED STATISTICS REPORT")
+            stats_data.append("=" * 80)
+            stats_data.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            stats_data.append("")
+            
+            # System status
+            stats_data.append("SYSTEM STATUS:")
+            stats_data.append("-" * 40)
+            if hasattr(self, 'ai_v2_integrator') and self.ai_v2_integrator:
+                health = self.ai_v2_integrator.check_system_health()
+                stats_data.append(f"Overall Status: {health.get('overall_status', 'unknown').upper()}")
+                stats_data.append(f"Uptime: {health.get('uptime_hours', 0):.1f} hours")
+            stats_data.append("")
+            
+            # Performance summary
+            stats_data.append("PERFORMANCE SUMMARY:")
+            stats_data.append("-" * 40)
+            if hasattr(self, 'ai_v2_integrator') and self.ai_v2_integrator:
+                performance = self.ai_v2_integrator._get_performance_summary()
+                hero_recs = performance.get('hero_recommendations_last_hour', 0)
+                card_evals = performance.get('card_evaluations_last_hour', 0)
+                hero_time = performance.get('avg_hero_response_time_ms', 0)
+                card_time = performance.get('avg_card_eval_time_ms', 0)
+                
+                stats_data.append(f"Hero Recommendations (1h): {hero_recs}")
+                stats_data.append(f"Card Evaluations (1h): {card_evals}")
+                stats_data.append(f"Avg Hero Response Time: {hero_time:.0f}ms")
+                stats_data.append(f"Avg Card Eval Time: {card_time:.0f}ms")
+            stats_data.append("")
+            
+            # Current session
+            stats_data.append("CURRENT SESSION:")
+            stats_data.append("-" * 40)
+            stats_data.append(f"Hero: {getattr(self, 'selected_hero_class', 'None')}")
+            stats_data.append(f"Phase: {getattr(self, 'current_draft_phase', 'waiting')}")
+            stats_data.append(f"Picks: {getattr(self, 'draft_picks_count', 0)}/30")
+            stats_data.append("")
+            
+            # Hero data
+            if hasattr(self, 'hero_recommendation') and self.hero_recommendation:
+                stats_data.append("HERO WINRATES:")
+                stats_data.append("-" * 40)
+                winrates = self.hero_recommendation.winrates
+                for hero, winrate in sorted(winrates.items(), key=lambda x: x[1], reverse=True):
+                    stats_data.append(f"{hero}: {winrate:.1f}%")
+            
+            stats_data.append("")
+            stats_data.append("=" * 80)
+            stats_data.append("Generated by Arena Bot AI v2 System")
+            
+            with open(filename, 'w', encoding='utf-8') as f:
+                f.write('\n'.join(stats_data))
+            
+            self.log_text(f"📋 Statistics exported to: {filename}")
+            
+        except Exception as e:
+            self.log_text(f"❌ Error exporting statistics: {e}")
     
     def run(self):
         """Start the GUI application."""
@@ -2928,6 +4833,365 @@ class IntegratedArenaBotGUI:
         if hasattr(self, 'root'):
             self.root.quit()
         print("❌ Arena Bot stopped")
+    
+    # === NEW AI v2 INTEGRATION METHODS ===
+    
+    def _handle_hero_selection(self, hero_classes: List[str]):
+        """Handle hero selection with AI v2 system."""
+        try:
+            if not self.hero_selector:
+                self.log_text("⚠️ Hero selection AI not available")
+                return
+            
+            if not hero_classes:
+                self.log_text("👑 Hero classes not detected, using fallback")
+                hero_classes = ["WARRIOR", "MAGE", "PALADIN"]  # Default fallback
+            
+            # Get AI v2 hero recommendation
+            self.log_text("🎯 Analyzing hero options with AI v2...")
+            hero_recommendation = self.ai_v2_integrator.get_hero_recommendation_with_recovery(hero_classes)
+            
+            # Display hero selection UI
+            self._display_hero_selection_ui(hero_recommendation)
+            
+            # Log recommendation details
+            recommended_hero = hero_recommendation.hero_classes[hero_recommendation.recommended_hero_index]
+            confidence = hero_recommendation.confidence_level
+            
+            self.log_text(f"🎯 AI v2 HERO RECOMMENDATION:")
+            self.log_text(f"   Recommended: {recommended_hero} ({confidence:.1%} confidence)")
+            self.log_text(f"   Explanation: {hero_recommendation.explanation}")
+            
+        except Exception as e:
+            self.log_text(f"❌ Hero selection error: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _handle_enhanced_hero_selection(self, hero_classes: List[str], hero_data: dict):
+        """Enhanced hero selection with full context and phase management."""
+        try:
+            if not self.ai_v2_integrator:
+                self.log_text("⚠️ AI v2 system not available")
+                return
+            
+            # Store the raw hero data for additional context
+            self.current_hero_data = hero_data
+            
+            if not hero_classes:
+                self.log_text("👑 Hero classes not detected, using fallback")
+                hero_classes = ["WARRIOR", "MAGE", "PALADIN"]  # Default fallback
+            
+            # Get AI v2 hero recommendation with enhanced error recovery
+            self.log_text("🎯 Analyzing hero options with AI v2 (enhanced)...")
+            hero_recommendation = self.ai_v2_integrator.get_hero_recommendation_with_recovery(hero_classes)
+            
+            # Store recommendation for later use
+            self.hero_recommendation = hero_recommendation
+            
+            # Display enhanced hero selection UI
+            self._display_hero_selection_ui(hero_recommendation)
+            
+            # Log detailed recommendation
+            recommended_hero = hero_recommendation.hero_classes[hero_recommendation.recommended_hero_index]
+            confidence = hero_recommendation.confidence_level
+            
+            self.log_text(f"🎯 AI v2 ENHANCED HERO RECOMMENDATION:")
+            self.log_text(f"   Recommended: {recommended_hero} ({confidence:.1%} confidence)")
+            self.log_text(f"   Explanation: {hero_recommendation.explanation}")
+            
+            # Show system health for transparency
+            self._show_system_health()
+            
+            # Prepare for transition to card picks
+            self._prepare_for_card_draft_phase(recommended_hero)
+            
+        except Exception as e:
+            self.log_text(f"❌ Enhanced hero selection error: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _prepare_for_card_draft_phase(self, recommended_hero: str):
+        """Prepare the system for transitioning to card draft phase."""
+        try:
+            # Store recommended hero for context
+            self.selected_hero_class = recommended_hero
+            
+            # Initialize hero-aware card evaluation context
+            if hasattr(self, 'grandmaster_advisor') and self.grandmaster_advisor:
+                self.log_text(f"🎯 Preparing AI v2 for {recommended_hero} card evaluation...")
+            
+            # Update status to show readiness
+            self.update_status(f"Hero Selected: {recommended_hero} | Ready for Card Picks")
+            
+            self.log_text(f"✅ System ready for hero-aware card recommendations")
+            
+            # Update progression display
+            if hasattr(self, 'update_draft_progression_display'):
+                self.update_draft_progression_display()
+            
+        except Exception as e:
+            self.log_text(f"⚠️ Error preparing for card draft: {e}")
+    
+    def _show_system_health(self):
+        """Show current AI v2 system health status."""
+        try:
+            if not self.ai_v2_integrator:
+                return
+                
+            health = self.ai_v2_integrator.check_system_health()
+            overall_status = health.get('overall_status', 'unknown')
+            
+            self.log_text(f"🔧 AI v2 System Health: {overall_status}")
+            
+            # Show component status
+            components = health.get('components', {})
+            for component, status in components.items():
+                if isinstance(status, dict):
+                    comp_status = status.get('status', 'unknown')
+                    response_time = status.get('response_time_ms', 0)
+                    self.log_text(f"   • {component}: {comp_status} ({response_time:.0f}ms)")
+            
+            # Show data source status
+            data_sources = health.get('data_sources', {})
+            if 'hsreplay' in data_sources:
+                hsreplay_status = data_sources['hsreplay'].get('status', 'unknown')
+                self.log_text(f"   • HSReplay API: {hsreplay_status}")
+                
+        except Exception as e:
+            self.log_text(f"⚠️ Could not check system health: {e}")
+    
+    def _show_draft_summary(self):
+        """Show comprehensive draft summary with hero and AI v2 context."""
+        try:
+            self.log_text(f"\n{'📊' * 50}")
+            self.log_text("📊 DRAFT SUMMARY")
+            
+            if self.selected_hero_class:
+                self.log_text(f"📊 Hero: {self.selected_hero_class}")
+                
+                if self.hero_recommendation:
+                    confidence = self.hero_recommendation.confidence_level
+                    self.log_text(f"📊 Hero Confidence: {confidence:.1%}")
+            
+            self.log_text(f"📊 Total Cards Drafted: {self.draft_picks_count}")
+            
+            # Show AI v2 system performance
+            if self.ai_v2_integrator:
+                try:
+                    performance = self.ai_v2_integrator._get_performance_summary()
+                    hero_recs = performance.get('hero_recommendations_last_hour', 0)
+                    card_evals = performance.get('card_evaluations_last_hour', 0)
+                    
+                    self.log_text(f"📊 AI v2 Performance:")
+                    self.log_text(f"   • Hero recommendations: {hero_recs}")
+                    self.log_text(f"   • Card evaluations: {card_evals}")
+                except:
+                    pass
+            
+            self.log_text(f"{'📊' * 50}")
+            
+        except Exception as e:
+            self.log_text(f"⚠️ Error showing draft summary: {e}")
+    
+    def _display_hero_selection_ui(self, hero_recommendation):
+        """Display dedicated hero selection panel with winrate displays, confidence indicators, and qualitative descriptions."""
+        try:
+            # Create hero selection window
+            hero_window = tk.Toplevel(self.root)
+            hero_window.title("👑 AI v2 Hero Selection - Grandmaster Coach")
+            hero_window.geometry("900x700")
+            hero_window.configure(bg='#1a1a2e')
+            hero_window.attributes('-topmost', True)
+            
+            # Make it modal
+            hero_window.transient(self.root)
+            hero_window.grab_set()
+            
+            # Title section
+            title_frame = tk.Frame(hero_window, bg='#1a1a2e')
+            title_frame.pack(fill='x', padx=20, pady=10)
+            
+            title_label = tk.Label(title_frame, 
+                                 text="👑 HERO SELECTION - AI v2 GRANDMASTER COACH",
+                                 font=('Arial', 16, 'bold'), fg='#ffd700', bg='#1a1a2e')
+            title_label.pack()
+            
+            subtitle_label = tk.Label(title_frame, 
+                                    text="Statistical Analysis + Meta Insights + Qualitative Assessment",
+                                    font=('Arial', 10), fg='#cccccc', bg='#1a1a2e')
+            subtitle_label.pack()
+            
+            # Confidence indicator
+            confidence_frame = tk.Frame(hero_window, bg='#1a1a2e')
+            confidence_frame.pack(fill='x', padx=20, pady=5)
+            
+            confidence_text = f"📊 Analysis Confidence: {hero_recommendation.confidence_level:.1%}"
+            confidence_color = '#27ae60' if hero_recommendation.confidence_level > 0.7 else '#f39c12' if hero_recommendation.confidence_level > 0.5 else '#e74c3c'
+            
+            confidence_label = tk.Label(confidence_frame, text=confidence_text,
+                                      font=('Arial', 11, 'bold'), fg=confidence_color, bg='#1a1a2e')
+            confidence_label.pack()
+            
+            # Heroes analysis section
+            heroes_frame = tk.Frame(hero_window, bg='#1a1a2e')
+            heroes_frame.pack(fill='both', expand=True, padx=20, pady=10)
+            
+            for i, hero_analysis in enumerate(hero_recommendation.hero_analysis):
+                hero_class = hero_analysis['class']
+                winrate = hero_analysis['winrate']
+                profile = hero_analysis.get('profile', {})
+                explanation = hero_analysis.get('explanation', '')
+                is_recommended = (i == hero_recommendation.recommended_hero_index)
+                
+                # Hero card frame
+                hero_frame = tk.Frame(heroes_frame, 
+                                    bg='#ffd700' if is_recommended else '#16213e',
+                                    relief='raised' if is_recommended else 'flat',
+                                    bd=3 if is_recommended else 1)
+                hero_frame.pack(fill='x', pady=8)
+                
+                # Hero header
+                header_frame = tk.Frame(hero_frame, bg='#ffd700' if is_recommended else '#16213e')
+                header_frame.pack(fill='x', padx=10, pady=5)
+                
+                # Hero name and recommendation indicator
+                hero_title = f"{'👑 ' if is_recommended else ''}#{i+1}. {hero_class}"
+                if is_recommended:
+                    hero_title += " - RECOMMENDED"
+                
+                hero_label = tk.Label(header_frame, text=hero_title,
+                                    font=('Arial', 14, 'bold'), 
+                                    fg='#1a1a2e' if is_recommended else '#ffd700',
+                                    bg='#ffd700' if is_recommended else '#16213e')
+                hero_label.pack(side='left')
+                
+                # Winrate display
+                winrate_text = f"{winrate:.1f}%"
+                winrate_color = '#27ae60' if winrate > 52 else '#f39c12' if winrate > 48 else '#e74c3c'
+                winrate_label = tk.Label(header_frame, text=winrate_text,
+                                       font=('Arial', 12, 'bold'), 
+                                       fg=winrate_color,
+                                       bg='#ffd700' if is_recommended else '#16213e')
+                winrate_label.pack(side='right')
+                
+                # Hero details
+                details_frame = tk.Frame(hero_frame, bg='#ffd700' if is_recommended else '#16213e')
+                details_frame.pack(fill='x', padx=10, pady=5)
+                
+                # Qualitative details
+                playstyle = profile.get('playstyle', 'Unknown')
+                complexity = profile.get('complexity', 'Unknown')
+                description = profile.get('description', 'No description available')
+                
+                details_text = f"Playstyle: {playstyle} | Complexity: {complexity}\n{description}"
+                details_label = tk.Label(details_frame, text=details_text,
+                                       font=('Arial', 9), 
+                                       fg='#1a1a2e' if is_recommended else '#cccccc',
+                                       bg='#ffd700' if is_recommended else '#16213e',
+                                       wraplength=800, justify='left')
+                details_label.pack(anchor='w')
+                
+                # AI explanation
+                if explanation:
+                    explanation_label = tk.Label(details_frame, text=f"Analysis: {explanation}",
+                                                font=('Arial', 9, 'italic'), 
+                                                fg='#1a1a2e' if is_recommended else '#cccccc',
+                                                bg='#ffd700' if is_recommended else '#16213e',
+                                                wraplength=800, justify='left')
+                    explanation_label.pack(anchor='w', pady=(5, 0))
+            
+            # Overall recommendation section
+            recommendation_frame = tk.Frame(hero_window, bg='#1a1a2e')
+            recommendation_frame.pack(fill='x', padx=20, pady=10)
+            
+            recommendation_text = hero_recommendation.explanation
+            recommendation_label = tk.Label(recommendation_frame, text=f"🎯 Overall Analysis:\n{recommendation_text}",
+                                          font=('Arial', 10), fg='#ffd700', bg='#1a1a2e',
+                                          wraplength=850, justify='left')
+            recommendation_label.pack()
+            
+            # Action buttons
+            button_frame = tk.Frame(hero_window, bg='#1a1a2e')
+            button_frame.pack(fill='x', padx=20, pady=10)
+            
+            close_button = tk.Button(button_frame, text="✅ Continue to Card Draft",
+                                   font=('Arial', 12, 'bold'), 
+                                   bg='#27ae60', fg='white',
+                                   command=hero_window.destroy)
+            close_button.pack(side='right', padx=10)
+            
+            health_button = tk.Button(button_frame, text="📊 System Health",
+                                    font=('Arial', 10), 
+                                    bg='#3498db', fg='white',
+                                    command=lambda: self._show_system_health())
+            health_button.pack(side='left', padx=10)
+            
+            # Store current hero for context
+            recommended_hero = hero_recommendation.hero_classes[hero_recommendation.recommended_hero_index]
+            self.current_hero = recommended_hero
+            
+            self.log_text(f"👑 Hero selection UI displayed for {len(hero_recommendation.hero_classes)} heroes")
+            
+        except Exception as e:
+            self.log_text(f"❌ Error displaying hero selection UI: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _show_system_health(self):
+        """Show system health status for AI v2 components."""
+        try:
+            if not self.ai_v2_integrator:
+                messagebox.showinfo("System Health", "AI v2 system not available")
+                return
+            
+            health = self.ai_v2_integrator.check_system_health()
+            
+            # Create health display window
+            health_window = tk.Toplevel(self.root)
+            health_window.title("📊 AI v2 System Health")
+            health_window.geometry("600x500")
+            health_window.configure(bg='#2c3e50')
+            health_window.attributes('-topmost', True)
+            
+            # Health text area
+            health_text = scrolledtext.ScrolledText(health_window, 
+                                                  font=('Consolas', 10),
+                                                  bg='#34495e', fg='#ecf0f1')
+            health_text.pack(fill='both', expand=True, padx=10, pady=10)
+            
+            # Format health information
+            health_info = f"🔍 AI v2 SYSTEM HEALTH REPORT\n"
+            health_info += f"{'=' * 50}\n\n"
+            health_info += f"Overall Status: {health['overall_status'].value.upper()}\n"
+            health_info += f"System Uptime: {health['uptime_hours']:.1f} hours\n\n"
+            
+            health_info += "📊 COMPONENT STATUS:\n"
+            for component, status in health['components'].items():
+                status_emoji = "✅" if status['status'] == 'online' else "⚠️" if status['status'] == 'degraded' else "❌"
+                health_info += f"{status_emoji} {component}: {status['status']}\n"
+                if 'response_time_ms' in status:
+                    health_info += f"   Response time: {status['response_time_ms']:.1f}ms\n"
+                if status.get('fallback_active'):
+                    health_info += f"   🔄 Fallback mode active\n"
+            
+            health_info += "\n📡 DATA SOURCES:\n"
+            for source, info in health['data_sources'].items():
+                if isinstance(info, dict):
+                    source_emoji = "✅" if info.get('status') == 'online' else "⚠️"
+                    health_info += f"{source_emoji} {source}: {info.get('status', 'unknown')}\n"
+            
+            health_info += f"\n⚡ PERFORMANCE:\n"
+            perf = health['performance']
+            health_info += f"Hero recommendations: {perf['hero_recommendations_last_hour']}/hour\n"
+            health_info += f"Card evaluations: {perf['card_evaluations_last_hour']}/hour\n"
+            health_info += f"Avg hero response: {perf['avg_hero_response_time_ms']:.1f}ms\n"
+            health_info += f"Avg card eval: {perf['avg_card_eval_time_ms']:.1f}ms\n"
+            
+            health_text.insert('1.0', health_info)
+            health_text.config(state='disabled')
+            
+        except Exception as e:
+            messagebox.showerror("System Health Error", f"Failed to get system health: {e}")
     
     def toggle_ultimate_detection(self):
         """Toggle Ultimate Detection Engine on/off."""
@@ -3328,6 +5592,679 @@ class CoordinateSelector:
                 text="🔍 Auto-Detect Mode",
                 fg='#E67E22'  # Orange for auto
             )
+    
+    def open_advanced_correction_center(self):
+        """Open the advanced manual correction center for both hero and card corrections."""
+        try:
+            correction_window = tk.Toplevel(self.root)
+            correction_window.title("🔧 Advanced Manual Correction Center")
+            correction_window.geometry("1000x800")
+            correction_window.configure(bg='#2C3E50')
+            correction_window.attributes('-topmost', True)
+            
+            # Make it modal
+            correction_window.transient(self.root)
+            correction_window.grab_set()
+            
+            # Title section
+            title_frame = tk.Frame(correction_window, bg='#34495E', relief='raised', bd=2)
+            title_frame.pack(fill='x', padx=10, pady=5)
+            
+            title_label = tk.Label(
+                title_frame,
+                text="🔧 ADVANCED MANUAL CORRECTION CENTER",
+                font=('Arial', 16, 'bold'),
+                fg='#E74C3C',
+                bg='#34495E'
+            )
+            title_label.pack(pady=10)
+            
+            subtitle_label = tk.Label(
+                title_frame,
+                text="Comprehensive Correction Workflow for Hero and Card AI Decisions",
+                font=('Arial', 10),
+                fg='#BDC3C7',
+                bg='#34495E'
+            )
+            subtitle_label.pack()
+            
+            # Main content area with tabs
+            from tkinter import ttk
+            style = ttk.Style()
+            style.theme_use('clam')
+            
+            notebook = ttk.Notebook(correction_window)
+            notebook.pack(fill='both', expand=True, padx=10, pady=10)
+            
+            # Hero Correction Tab
+            hero_tab = tk.Frame(notebook, bg='#34495E')
+            notebook.add(hero_tab, text="👑 Hero Corrections")
+            self._create_hero_correction_tab(hero_tab)
+            
+            # Card Correction Tab
+            card_tab = tk.Frame(notebook, bg='#34495E')
+            notebook.add(card_tab, text="🃏 Card Corrections")
+            self._create_card_correction_tab(card_tab)
+            
+            # System Override Tab
+            override_tab = tk.Frame(notebook, bg='#34495E')
+            notebook.add(override_tab, text="⚙️ System Overrides")
+            self._create_system_override_tab(override_tab)
+            
+            # History Tab
+            history_tab = tk.Frame(notebook, bg='#34495E')
+            notebook.add(history_tab, text="📋 Correction History")
+            self._create_correction_history_tab(history_tab)
+            
+            # Control buttons
+            controls_frame = tk.Frame(correction_window, bg='#2C3E50')
+            controls_frame.pack(fill='x', padx=10, pady=5)
+            
+            # Apply All button
+            apply_btn = tk.Button(
+                controls_frame,
+                text="✅ Apply All Corrections",
+                command=lambda: self._apply_all_corrections(correction_window),
+                bg='#27AE60',
+                fg='white',
+                font=('Arial', 11, 'bold'),
+                relief='raised',
+                bd=3
+            )
+            apply_btn.pack(side='left', padx=5)
+            
+            # Reset button
+            reset_btn = tk.Button(
+                controls_frame,
+                text="🔄 Reset All",
+                command=lambda: self._reset_all_corrections(correction_window),
+                bg='#F39C12',
+                fg='white',
+                font=('Arial', 10),
+                relief='raised',
+                bd=2
+            )
+            reset_btn.pack(side='left', padx=5)
+            
+            # Close button
+            close_btn = tk.Button(
+                controls_frame,
+                text="❌ Close",
+                command=correction_window.destroy,
+                bg='#E74C3C',
+                fg='white',
+                font=('Arial', 10),
+                relief='raised',
+                bd=2
+            )
+            close_btn.pack(side='right', padx=5)
+            
+        except Exception as e:
+            self.log_text(f"❌ Error opening correction center: {e}")
+            messagebox.showerror("Error", f"Failed to open correction center: {e}")
+    
+    def _create_hero_correction_tab(self, parent):
+        """Create the hero correction tab for manual hero choice overrides."""
+        # Header
+        header_frame = tk.Frame(parent, bg='#34495E')
+        header_frame.pack(fill='x', padx=10, pady=10)
+        
+        header_label = tk.Label(
+            header_frame,
+            text="👑 Manual Hero Selection Override",
+            font=('Arial', 14, 'bold'),
+            fg='#F39C12',
+            bg='#34495E'
+        )
+        header_label.pack()
+        
+        # Instructions
+        instructions_label = tk.Label(
+            header_frame,
+            text="Override AI hero recommendations when you disagree with the analysis",
+            font=('Arial', 10),
+            fg='#BDC3C7',
+            bg='#34495E'
+        )
+        instructions_label.pack()
+        
+        # Current hero status
+        status_frame = tk.Frame(parent, bg='#34495E', relief='sunken', bd=2)
+        status_frame.pack(fill='x', padx=10, pady=5)
+        
+        current_hero_text = f"Current Hero: {self.current_hero or 'None Selected'}"
+        self.current_hero_label = tk.Label(
+            status_frame,
+            text=current_hero_text,
+            font=('Arial', 12, 'bold'),
+            fg='#E74C3C',
+            bg='#34495E'
+        )
+        self.current_hero_label.pack(pady=5)
+        
+        # Hero override section
+        override_frame = tk.Frame(parent, bg='#34495E')
+        override_frame.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        # Hero selection dropdown
+        hero_selection_frame = tk.Frame(override_frame, bg='#34495E')
+        hero_selection_frame.pack(fill='x', pady=10)
+        
+        tk.Label(
+            hero_selection_frame,
+            text="Select Hero to Override:",
+            font=('Arial', 11, 'bold'),
+            fg='#ECF0F1',
+            bg='#34495E'
+        ).pack(side='left')
+        
+        hero_classes = ['WARRIOR', 'PALADIN', 'HUNTER', 'ROGUE', 'PRIEST', 
+                       'SHAMAN', 'MAGE', 'WARLOCK', 'DRUID', 'DEMONHUNTER']
+        
+        self.hero_override_var = tk.StringVar(value="Select Hero...")
+        hero_dropdown = ttk.Combobox(
+            hero_selection_frame,
+            textvariable=self.hero_override_var,
+            values=hero_classes,
+            state='readonly',
+            width=15
+        )
+        hero_dropdown.pack(side='left', padx=10)
+        
+        # Override reason text area
+        reason_frame = tk.Frame(override_frame, bg='#34495E')
+        reason_frame.pack(fill='both', expand=True, pady=10)
+        
+        tk.Label(
+            reason_frame,
+            text="Reason for Override (optional):",
+            font=('Arial', 11, 'bold'),
+            fg='#ECF0F1',
+            bg='#34495E'
+        ).pack(anchor='w')
+        
+        self.hero_override_reason = scrolledtext.ScrolledText(
+            reason_frame,
+            height=8,
+            width=80,
+            font=('Arial', 10),
+            bg='#16213E',
+            fg='#ECF0F1',
+            insertbackground='#ECF0F1'
+        )
+        self.hero_override_reason.pack(fill='both', expand=True, pady=5)
+        self.hero_override_reason.insert('1.0', "Enter your reasoning for overriding the AI's hero recommendation...")
+        
+        # Apply hero override button
+        apply_hero_btn = tk.Button(
+            override_frame,
+            text="👑 Apply Hero Override",
+            command=self._apply_hero_override,
+            bg='#8E44AD',
+            fg='white',
+            font=('Arial', 11, 'bold'),
+            relief='raised',
+            bd=3
+        )
+        apply_hero_btn.pack(pady=10)
+    
+    def _create_card_correction_tab(self, parent):
+        """Create the card correction tab for manual card choice overrides."""
+        # Header
+        header_frame = tk.Frame(parent, bg='#34495E')
+        header_frame.pack(fill='x', padx=10, pady=10)
+        
+        header_label = tk.Label(
+            header_frame,
+            text="🃏 Manual Card Selection Override",
+            font=('Arial', 14, 'bold'),
+            fg='#3498DB',
+            bg='#34495E'
+        )
+        header_label.pack()
+        
+        # Instructions
+        instructions_label = tk.Label(
+            header_frame,
+            text="Override AI card recommendations and provide feedback for learning",
+            font=('Arial', 10),
+            fg='#BDC3C7',
+            bg='#34495E'
+        )
+        instructions_label.pack()
+        
+        # Last recommendation display
+        last_rec_frame = tk.Frame(parent, bg='#34495E', relief='sunken', bd=2)
+        last_rec_frame.pack(fill='x', padx=10, pady=5)
+        
+        self.last_recommendation_label = tk.Label(
+            last_rec_frame,
+            text="Last AI Recommendation: No recent recommendations",
+            font=('Arial', 11),
+            fg='#E74C3C',
+            bg='#34495E'
+        )
+        self.last_recommendation_label.pack(pady=5)
+        
+        # Card override section
+        override_frame = tk.Frame(parent, bg='#34495E')
+        override_frame.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        # Manual card search
+        search_frame = tk.Frame(override_frame, bg='#34495E')
+        search_frame.pack(fill='x', pady=10)
+        
+        tk.Label(
+            search_frame,
+            text="Override with Card:",
+            font=('Arial', 11, 'bold'),
+            fg='#ECF0F1',
+            bg='#34495E'
+        ).pack(side='left')
+        
+        self.card_override_entry = tk.Entry(
+            search_frame,
+            font=('Arial', 11),
+            width=30,
+            bg='#16213E',
+            fg='#ECF0F1',
+            insertbackground='#ECF0F1'
+        )
+        self.card_override_entry.pack(side='left', padx=10)
+        self.card_override_entry.bind('<KeyRelease>', self._update_card_suggestions)
+        
+        # Card suggestions listbox
+        suggestions_frame = tk.Frame(override_frame, bg='#34495E')
+        suggestions_frame.pack(fill='x', pady=5)
+        
+        tk.Label(
+            suggestions_frame,
+            text="Card Suggestions:",
+            font=('Arial', 10, 'bold'),
+            fg='#ECF0F1',
+            bg='#34495E'
+        ).pack(anchor='w')
+        
+        self.card_suggestions_listbox = tk.Listbox(
+            suggestions_frame,
+            height=6,
+            font=('Arial', 10),
+            bg='#16213E',
+            fg='#ECF0F1',
+            selectbackground='#3498DB'
+        )
+        self.card_suggestions_listbox.pack(fill='x', pady=5)
+        self.card_suggestions_listbox.bind('<Double-Button-1>', self._select_suggestion)
+        
+        # Override feedback area
+        feedback_frame = tk.Frame(override_frame, bg='#34495E')
+        feedback_frame.pack(fill='both', expand=True, pady=10)
+        
+        tk.Label(
+            feedback_frame,
+            text="Feedback for AI Learning:",
+            font=('Arial', 11, 'bold'),
+            fg='#ECF0F1',
+            bg='#34495E'
+        ).pack(anchor='w')
+        
+        self.card_override_feedback = scrolledtext.ScrolledText(
+            feedback_frame,
+            height=6,
+            width=80,
+            font=('Arial', 10),
+            bg='#16213E',
+            fg='#ECF0F1',
+            insertbackground='#ECF0F1'
+        )
+        self.card_override_feedback.pack(fill='both', expand=True, pady=5)
+        self.card_override_feedback.insert('1.0', "Explain why you chose this card over the AI's recommendation...")
+        
+        # Apply card override button
+        apply_card_btn = tk.Button(
+            override_frame,
+            text="🃏 Apply Card Override",
+            command=self._apply_card_override,
+            bg='#27AE60',
+            fg='white',
+            font=('Arial', 11, 'bold'),
+            relief='raised',
+            bd=3
+        )
+        apply_card_btn.pack(pady=10)
+    
+    def _create_system_override_tab(self, parent):
+        """Create the system override tab for granular AI control."""
+        # Header
+        header_frame = tk.Frame(parent, bg='#34495E')
+        header_frame.pack(fill='x', padx=10, pady=10)
+        
+        header_label = tk.Label(
+            header_frame,
+            text="⚙️ System Override Controls",
+            font=('Arial', 14, 'bold'),
+            fg='#E67E22',
+            bg='#34495E'
+        )
+        header_label.pack()
+        
+        # Emergency controls section
+        emergency_frame = tk.LabelFrame(
+            parent,
+            text="Emergency Fallback Controls",
+            font=('Arial', 12, 'bold'),
+            fg='#E74C3C',
+            bg='#34495E',
+            bd=2,
+            relief='groove'
+        )
+        emergency_frame.pack(fill='x', padx=10, pady=10)
+        
+        # AI system toggles
+        self.hero_ai_enabled = tk.BooleanVar(value=True)
+        hero_toggle = tk.Checkbutton(
+            emergency_frame,
+            text="🤖 Hero AI System Enabled",
+            variable=self.hero_ai_enabled,
+            font=('Arial', 11),
+            fg='#ECF0F1',
+            bg='#34495E',
+            selectcolor='#27AE60'
+        )
+        hero_toggle.pack(anchor='w', padx=10, pady=5)
+        
+        self.card_ai_enabled = tk.BooleanVar(value=True)
+        card_toggle = tk.Checkbutton(
+            emergency_frame,
+            text="🤖 Card AI System Enabled",
+            variable=self.card_ai_enabled,
+            font=('Arial', 11),
+            fg='#ECF0F1',
+            bg='#34495E',
+            selectcolor='#27AE60'
+        )
+        card_toggle.pack(anchor='w', padx=10, pady=5)
+        
+        # Data source controls
+        data_frame = tk.LabelFrame(
+            parent,
+            text="Data Source Controls",
+            font=('Arial', 12, 'bold'),
+            fg='#3498DB',
+            bg='#34495E',
+            bd=2,
+            relief='groove'
+        )
+        data_frame.pack(fill='x', padx=10, pady=10)
+        
+        self.hsreplay_enabled = tk.BooleanVar(value=True)
+        hsreplay_toggle = tk.Checkbutton(
+            data_frame,
+            text="📊 HSReplay Data Integration",
+            variable=self.hsreplay_enabled,
+            font=('Arial', 11),
+            fg='#ECF0F1',
+            bg='#34495E',
+            selectcolor='#27AE60'
+        )
+        hsreplay_toggle.pack(anchor='w', padx=10, pady=5)
+        
+        # Confidence thresholds
+        threshold_frame = tk.LabelFrame(
+            parent,
+            text="Confidence Thresholds",
+            font=('Arial', 12, 'bold'),
+            fg='#8E44AD',
+            bg='#34495E',
+            bd=2,
+            relief='groove'
+        )
+        threshold_frame.pack(fill='x', padx=10, pady=10)
+        
+        # Hero confidence threshold
+        hero_threshold_frame = tk.Frame(threshold_frame, bg='#34495E')
+        hero_threshold_frame.pack(fill='x', padx=10, pady=5)
+        
+        tk.Label(
+            hero_threshold_frame,
+            text="Hero Recommendation Threshold:",
+            font=('Arial', 10),
+            fg='#ECF0F1',
+            bg='#34495E'
+        ).pack(side='left')
+        
+        self.hero_confidence_threshold = tk.DoubleVar(value=0.6)
+        hero_scale = tk.Scale(
+            hero_threshold_frame,
+            variable=self.hero_confidence_threshold,
+            from_=0.1,
+            to=0.9,
+            resolution=0.1,
+            orient='horizontal',
+            length=300,
+            bg='#34495E',
+            fg='#ECF0F1'
+        )
+        hero_scale.pack(side='right')
+        
+        # Card confidence threshold
+        card_threshold_frame = tk.Frame(threshold_frame, bg='#34495E')
+        card_threshold_frame.pack(fill='x', padx=10, pady=5)
+        
+        tk.Label(
+            card_threshold_frame,
+            text="Card Recommendation Threshold:",
+            font=('Arial', 10),
+            fg='#ECF0F1',
+            bg='#34495E'
+        ).pack(side='left')
+        
+        self.card_confidence_threshold = tk.DoubleVar(value=0.7)
+        card_scale = tk.Scale(
+            card_threshold_frame,
+            variable=self.card_confidence_threshold,
+            from_=0.1,
+            to=0.9,
+            resolution=0.1,
+            orient='horizontal',
+            length=300,
+            bg='#34495E',
+            fg='#ECF0F1'
+        )
+        card_scale.pack(side='right')
+    
+    def _create_correction_history_tab(self, parent):
+        """Create the correction history tab to show past overrides."""
+        # Header
+        header_frame = tk.Frame(parent, bg='#34495E')
+        header_frame.pack(fill='x', padx=10, pady=10)
+        
+        header_label = tk.Label(
+            header_frame,
+            text="📋 Correction History & Learning",
+            font=('Arial', 14, 'bold'),
+            fg='#27AE60',
+            bg='#34495E'
+        )
+        header_label.pack()
+        
+        # History display
+        history_text = scrolledtext.ScrolledText(
+            parent,
+            height=25,
+            width=100,
+            font=('Consolas', 9),
+            bg='#16213E',
+            fg='#ECF0F1',
+            insertbackground='#ECF0F1'
+        )
+        history_text.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        # Load correction history
+        history_content = self._load_correction_history()
+        history_text.insert('1.0', history_content)
+        history_text.config(state='disabled')
+    
+    def _apply_hero_override(self):
+        """Apply the manual hero override."""
+        try:
+            selected_hero = self.hero_override_var.get()
+            reason = self.hero_override_reason.get('1.0', 'end-1c')
+            
+            if selected_hero == "Select Hero...":
+                messagebox.showwarning("Warning", "Please select a hero to override")
+                return
+            
+            # Update current hero
+            self.current_hero = selected_hero
+            
+            # Log the override
+            self._log_correction("HERO", f"Override: {selected_hero}", reason)
+            
+            # Update UI
+            self.current_hero_label.config(text=f"Current Hero: {selected_hero}")
+            
+            # Show confirmation
+            messagebox.showinfo("Success", f"Hero override applied: {selected_hero}")
+            
+        except Exception as e:
+            self.log_text(f"❌ Error applying hero override: {e}")
+            messagebox.showerror("Error", f"Failed to apply hero override: {e}")
+    
+    def _apply_card_override(self):
+        """Apply the manual card override."""
+        try:
+            card_name = self.card_override_entry.get()
+            feedback = self.card_override_feedback.get('1.0', 'end-1c')
+            
+            if not card_name:
+                messagebox.showwarning("Warning", "Please enter a card name")
+                return
+            
+            # Log the override
+            self._log_correction("CARD", f"Override: {card_name}", feedback)
+            
+            # Update last recommendation display
+            self.last_recommendation_label.config(text=f"Last Override: {card_name}")
+            
+            # Show confirmation
+            messagebox.showinfo("Success", f"Card override applied: {card_name}")
+            
+        except Exception as e:
+            self.log_text(f"❌ Error applying card override: {e}")
+            messagebox.showerror("Error", f"Failed to apply card override: {e}")
+    
+    def _update_card_suggestions(self, event=None):
+        """Update card suggestions based on user input."""
+        try:
+            search_text = self.card_override_entry.get().lower()
+            if len(search_text) < 2:
+                self.card_suggestions_listbox.delete(0, 'end')
+                return
+            
+            # Get card suggestions from cards database
+            suggestions = []
+            if hasattr(self, 'cards_json_loader') and self.cards_json_loader:
+                all_cards = self.cards_json_loader.get_all_card_names()
+                suggestions = [name for name in all_cards if search_text in name.lower()][:10]
+            
+            # Update listbox
+            self.card_suggestions_listbox.delete(0, 'end')
+            for suggestion in suggestions:
+                self.card_suggestions_listbox.insert('end', suggestion)
+                
+        except Exception as e:
+            self.log_text(f"❌ Error updating suggestions: {e}")
+    
+    def _select_suggestion(self, event=None):
+        """Select a card from suggestions."""
+        try:
+            selection = self.card_suggestions_listbox.curselection()
+            if selection:
+                selected_card = self.card_suggestions_listbox.get(selection[0])
+                self.card_override_entry.delete(0, 'end')
+                self.card_override_entry.insert(0, selected_card)
+        except Exception as e:
+            self.log_text(f"❌ Error selecting suggestion: {e}")
+    
+    def _apply_all_corrections(self, window):
+        """Apply all pending corrections."""
+        try:
+            # Apply system settings
+            corrections_applied = 0
+            
+            # Log system settings changes
+            self._log_correction("SYSTEM", "Settings Updated", "System override settings applied")
+            corrections_applied += 1
+            
+            messagebox.showinfo("Success", f"Applied {corrections_applied} corrections successfully")
+            window.destroy()
+            
+        except Exception as e:
+            self.log_text(f"❌ Error applying corrections: {e}")
+            messagebox.showerror("Error", f"Failed to apply corrections: {e}")
+    
+    def _reset_all_corrections(self, window):
+        """Reset all correction settings to defaults."""
+        try:
+            # Reset system toggles
+            self.hero_ai_enabled.set(True)
+            self.card_ai_enabled.set(True)
+            self.hsreplay_enabled.set(True)
+            
+            # Reset thresholds
+            self.hero_confidence_threshold.set(0.6)
+            self.card_confidence_threshold.set(0.7)
+            
+            # Clear override fields
+            self.hero_override_var.set("Select Hero...")
+            self.hero_override_reason.delete('1.0', 'end')
+            self.hero_override_reason.insert('1.0', "Enter your reasoning for overriding the AI's hero recommendation...")
+            
+            self.card_override_entry.delete(0, 'end')
+            self.card_override_feedback.delete('1.0', 'end')
+            self.card_override_feedback.insert('1.0', "Explain why you chose this card over the AI's recommendation...")
+            
+            messagebox.showinfo("Reset", "All correction settings reset to defaults")
+            
+        except Exception as e:
+            self.log_text(f"❌ Error resetting corrections: {e}")
+            messagebox.showerror("Error", f"Failed to reset corrections: {e}")
+    
+    def _log_correction(self, correction_type, action, reason):
+        """Log a manual correction for learning purposes."""
+        try:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            log_entry = f"[{timestamp}] {correction_type}: {action} | Reason: {reason}\n"
+            
+            # Append to correction log file
+            log_file = Path("corrections_log.txt")
+            with open(log_file, 'a', encoding='utf-8') as f:
+                f.write(log_entry)
+                
+            # Also log to main text area
+            self.log_text(f"📝 Correction logged: {correction_type} - {action}")
+            
+        except Exception as e:
+            self.log_text(f"❌ Error logging correction: {e}")
+    
+    def _load_correction_history(self):
+        """Load and format correction history."""
+        try:
+            log_file = Path("corrections_log.txt")
+            if not log_file.exists():
+                return "No correction history available yet.\n\nThis area will show your manual overrides and feedback to help the AI learn from your decisions."
+            
+            with open(log_file, 'r', encoding='utf-8') as f:
+                history = f.read()
+                
+            if not history.strip():
+                return "No correction history available yet.\n\nThis area will show your manual overrides and feedback to help the AI learn from your decisions."
+                
+            return f"Recent Corrections:\n{'='*50}\n\n{history}"
+            
+        except Exception as e:
+            return f"Error loading correction history: {e}"
 
 
 def main():

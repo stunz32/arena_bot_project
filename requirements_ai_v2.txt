@@ -1,0 +1,17 @@
+# AI v2 Enhanced Dependencies for Grandmaster Arena Coach - Latest Versions
+# Core machine learning libraries
+lightgbm>=4.5.0
+scikit-learn>=1.5.0
+pandas>=2.2.0
+
+# Windows-specific dependencies for overlay click-through functionality
+pywin32>=306; sys_platform == 'win32'
+
+# Mouse position detection for hover functionality
+pyautogui>=0.9.54
+
+# HTTP requests for HSReplay API integration
+requests>=2.32.0
+
+# Note: beautifulsoup4 no longer needed due to direct JSON API access
+# Note: existing requirements.txt dependencies are preserved

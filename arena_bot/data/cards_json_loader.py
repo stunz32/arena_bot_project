@@ -48,6 +48,12 @@ class CardsJsonLoader:
         self.cards_by_name: Dict[str, str] = {}  # name -> card_id mapping
         self.normalized_names: Dict[str, str] = {}  # normalized_name -> card_id mapping
         
+        # --- NEW: HSReplay Integration ID Mapping ---
+        # The "Rosetta Stone" for HSReplay API integration
+        self.dbf_id_to_card_id_map: Dict[int, str] = {}  # dbf_id -> card_id mapping
+        self.card_id_to_dbf_id_map: Dict[str, int] = {}  # card_id -> dbf_id mapping
+        self.hero_card_to_class_map: Dict[str, str] = {}  # hero_card_id -> class mapping
+        
         # Fuzzy matching configuration
         self.fuzzy_threshold = 80  # Minimum similarity score for fuzzy matches
         self.exact_threshold = 95   # Threshold for "near exact" matches
@@ -81,8 +87,27 @@ class CardsJsonLoader:
                         # Create normalized name index for fuzzy matching
                         normalized_name = self._normalize_card_name(name)
                         self.normalized_names[normalized_name] = card_id
+                    
+                    # --- NEW: Build HSReplay ID mappings ---
+                    dbf_id = card.get('dbfId')
+                    if dbf_id and card_id:
+                        self.dbf_id_to_card_id_map[dbf_id] = card_id
+                        self.card_id_to_dbf_id_map[card_id] = dbf_id
+                    
+                    # Build hero card to class mapping for hero selection
+                    card_type = card.get('type', '')
+                    if card_type == 'HERO' and card_id:
+                        card_class = card.get('cardClass', '')
+                        if card_class:
+                            self.hero_card_to_class_map[card_id] = card_class
+            
+            # Enhanced logging with mapping statistics
+            dbf_mappings = len(self.dbf_id_to_card_id_map)
+            hero_mappings = len(self.hero_card_to_class_map)
             
             self.logger.info(f"Loaded {len(self.cards_data)} cards from JSON database")
+            self.logger.info(f"Built DBF ID mappings for {dbf_mappings} cards (HSReplay integration)")
+            self.logger.info(f"Built hero class mappings for {hero_mappings} heroes (hero selection)")
             
         except Exception as e:
             self.logger.error(f"Failed to load cards JSON: {e}")
@@ -432,6 +457,65 @@ class CardsJsonLoader:
     def get_all_collectible_cards(self) -> List[Dict[str, Any]]:
         """Returns a list of all collectible card data dictionaries."""
         return [card for card in self.cards_data.values() if card.get('collectible')]
+    
+    # --- NEW: HSReplay Integration Methods ---
+    
+    def get_card_id_from_dbf_id(self, dbf_id: int) -> Optional[str]:
+        """
+        Translate HSReplay dbf_id to our internal card_id.
+        
+        This is the crucial link between HSReplay API data and our bot's systems.
+        
+        Args:
+            dbf_id: Numerical DBF ID from HSReplay API
+            
+        Returns:
+            String card_id (e.g., "TOY_380") or None if not found
+        """
+        return self.dbf_id_to_card_id_map.get(dbf_id)
+    
+    def get_dbf_id_from_card_id(self, card_id: str) -> Optional[int]:
+        """
+        Translate our internal card_id to HSReplay dbf_id.
+        
+        Args:
+            card_id: String card ID (e.g., "TOY_380")
+            
+        Returns:
+            Numerical DBF ID for HSReplay API or None if not found
+        """
+        return self.card_id_to_dbf_id_map.get(card_id)
+    
+    def get_class_from_hero_card_id(self, hero_card_id: str) -> Optional[str]:
+        """
+        Translate hero card ID to class name for hero selection.
+        
+        Args:
+            hero_card_id: Hero card ID (e.g., "HERO_01")
+            
+        Returns:
+            Class name (e.g., "WARRIOR") or None if not found
+        """
+        return self.hero_card_to_class_map.get(hero_card_id)
+    
+    def get_id_mapping_statistics(self) -> Dict[str, Any]:
+        """
+        Get comprehensive statistics about ID mappings.
+        
+        Returns:
+            Dictionary with mapping counts and success rates
+        """
+        total_cards = len(self.cards_data)
+        dbf_mappings = len(self.dbf_id_to_card_id_map)
+        hero_mappings = len(self.hero_card_to_class_map)
+        
+        return {
+            'total_cards_loaded': total_cards,
+            'dbf_id_mappings': dbf_mappings,
+            'hero_class_mappings': hero_mappings,
+            'dbf_mapping_rate': (dbf_mappings / total_cards * 100) if total_cards > 0 else 0,
+            'mapping_status': 'ready' if dbf_mappings > 0 else 'unavailable'
+        }
 
 # Global instance like Arena Tracker
 _cards_json_loader = None
