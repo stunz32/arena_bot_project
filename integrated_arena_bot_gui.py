@@ -2190,7 +2190,8 @@ class IntegratedArenaBotGUI:
         self.fallback_mode_label.config(text="💥 System Error", fg=error_config[1])
     
     def toggle_debug_mode(self):
-        """Toggle debug mode on/off with immediate feedback."""
+        """Toggle debug mode on/off with immediate and accurate feedback."""
+        # The .get() method retrieves the CURRENT state of the checkbox
         if self.debug_enabled.get():
             enable_debug()
             self.log_text("🐛 DEBUG MODE ENABLED - Visual debugging and detailed metrics are now active.")
@@ -4847,10 +4848,14 @@ class IntegratedArenaBotGUI:
     
     def toggle_ultimate_detection(self):
         """Toggle Ultimate Detection Engine on/off with immediate feedback."""
+        if not self.ultimate_detector:
+            self.log_text("⚠️ Ultimate Detection Engine not available.")
+            self.use_ultimate_detection.set(False)
+            return
+
         if self.use_ultimate_detection.get():
             self.log_text("🚀 Ultimate Detection Engine ENABLED - Using advanced analysis.")
-            if not self.cache_build_in_progress and self.ultimate_detector:
-                # Eagerly load the database in the background if not already done
+            if not self.cache_build_in_progress:
                 threading.Thread(target=self._load_ultimate_database, daemon=True).start()
         else:
             self.log_text("📉 Ultimate Detection Engine DISABLED - Using basic histogram matching.")
@@ -4874,37 +4879,16 @@ class IntegratedArenaBotGUI:
             self.log_text("   Using standard card detection without arena prioritization")
     
     def toggle_phash_detection(self):
-        """Toggle pHash Detection on/off."""
+        """Toggle pHash Detection on/off with immediate feedback."""
         if not self.phash_matcher:
-            self.log_text("⚠️ pHash Detection not available")
-            self.log_text("   Install with: pip install imagehash")
+            self.log_text("⚠️ pHash Detection not available. Install 'imagehash'.")
             self.use_phash_detection.set(False)
             return
-        
+
         if self.use_phash_detection.get():
-            self.log_text("⚡ pHash Detection ENABLED")
-            self.log_text("   Ultra-fast pre-filtering active:")
-            self.log_text("   • 100-1000x faster detection for clear card images")
-            self.log_text("   • 64-bit DCT perceptual hashes with Hamming distance matching")
-            self.log_text("   • Sub-millisecond detection time for matching cards")
-            self.log_text("   • Graceful fallback to histogram matching for unclear cards")
-            
-            # Show pHash statistics if available
-            try:
-                stats = self.phash_matcher.get_statistics()
-                if stats['total_cards'] > 0:
-                    self.log_text(f"   ✅ pHash database ready: {stats['total_cards']} cards loaded")
-                    if stats['total_lookups'] > 0:
-                        self.log_text(f"   📊 Performance: {stats['avg_lookup_time_ms']:.1f}ms avg, "
-                                    f"{stats['success_rate']*100:.1f}% success rate")
-                else:
-                    self.log_text("   ⚠️ pHash database not loaded - will load on first use")
-            except Exception as e:
-                self.log_text(f"   ℹ️ pHash statistics unavailable: {e}")
+            self.log_text("⚡ pHash Detection ENABLED - Using ultra-fast pre-filtering.")
         else:
-            self.log_text("📉 pHash Detection DISABLED")
-            self.log_text("   Using histogram matching as primary detection method")
-            self.log_text("   Expected detection time: 50-500ms per card")
+            self.log_text("📉 pHash Detection DISABLED - Using standard detection methods.")
     
     def run_command_line(self):
         """Fallback command-line mode."""
