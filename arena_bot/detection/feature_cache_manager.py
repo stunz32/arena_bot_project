@@ -81,7 +81,9 @@ class FeatureCacheManager:
         """Save cache metadata."""
         try:
             self.metadata["last_updated"] = datetime.now().isoformat()
-            with open(self.metadata_file, 'w') as f:
+            # Ensure the directory exists before writing
+            self.metadata_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.metadata_file, 'w', encoding='utf-8') as f:
                 json.dump(self.metadata, f, indent=2)
         except Exception as e:
             logger.error(f"Failed to save cache metadata: {e}")

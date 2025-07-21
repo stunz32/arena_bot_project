@@ -186,7 +186,7 @@ class SystemIntegrator:
         Tests all components and data sources individually.
         """
         health_report = {
-            'overall_status': SystemStatus.ONLINE,
+            'overall_status': SystemStatus.ONLINE.value,
             'components': {},
             'data_sources': {},
             'performance': self._get_performance_summary(),
@@ -207,7 +207,7 @@ class SystemIntegrator:
                 
                 # Update overall status
                 if health.status in [SystemStatus.ERROR, SystemStatus.OFFLINE]:
-                    health_report['overall_status'] = SystemStatus.DEGRADED
+                    health_report['overall_status'] = SystemStatus.DEGRADED.value
                     
             except Exception as e:
                 self.logger.error(f"Health check failed for {component_name}: {e}")

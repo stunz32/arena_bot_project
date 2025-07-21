@@ -23,36 +23,17 @@ from data.cards_json_loader import get_cards_json_loader
 @dataclass
 class HSReplayConfig:
     """Configuration for HSReplay API access."""
-    
-    # API Endpoints
-    CARD_STATS_URL = "https://hsreplay.net/analytics/query/card_list_free/"
-    HERO_STATS_URL = "https://hsreplay.net/analytics/query/player_class_performance_summary_v2/"
-    
-    # Query parameters
-    CARD_PARAMS = {
-        "GameType": "UNDERGROUND_ARENA",
-        "TimeRange": "CURRENT_PATCH", 
-        "LeagueRankRange": "BRONZE_THROUGH_GOLD"
-    }
-    
-    # Cache settings
+    CARD_STATS_URL = "https://hsreplay.net/api/v1/analytics/card_stats/"
+    HERO_STATS_URL = "https://hsreplay.net/api/v1/analytics/hero_stats/"
+    CARD_PARAMS = {"gameType": "ARENA", "timeRange": "CURRENT_PATCH", "rankRange": "ALL"}
     CARD_CACHE_HOURS = 24
     HERO_CACHE_HOURS = 12
-    
-    # Request settings
     REQUEST_TIMEOUT = 30
     RETRY_ATTEMPTS = 3
     RETRY_DELAY = 2
-    
-    # Headers to appear like a browser
     HEADERS = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
-        "DNT": "1",
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1"
+        "Accept": "application/json",
     }
 
 

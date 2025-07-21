@@ -1,72 +1,31 @@
-"""
-Simple logging configuration for Arena Bot.
-
-Following CLAUDE.md principles - minimal, focused, and easy to understand.
-"""
-
-import logging
-import logging.handlers
+import sys
+from loguru import logger
 from pathlib import Path
-from datetime import datetime
 
-
-def setup_logging(log_level=logging.INFO):
+def setup_logging():
     """
-    Set up logging for the Arena Bot application.
+    Set up Loguru for detailed and beautiful logging.
+    """
+    logger.remove() # Remove default handler
     
-    Args:
-        log_level: Logging level (default: INFO)
-    """
-    # Create logs directory if it doesn't exist
+    # Console logger with colors and better formatting
+    logger.add(
+        sys.stderr,
+        level="INFO",
+        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+        colorize=True
+    )
+    
+    # Create logs directory
     log_dir = Path(__file__).parent.parent.parent / "logs"
     log_dir.mkdir(exist_ok=True)
     
-    # Create log filename with timestamp
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_file = log_dir / f"arena_bot_{timestamp}.log"
+    # File logger for history
+    log_file = log_dir / "arena_bot_{time:YYYY-MM-DD}.log"
+    logger.add(str(log_file), level="DEBUG", rotation="10 MB", retention="7 days", encoding="utf-8")
     
-    # Configure logging format
-    formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    
-    # Console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(log_level)
-    console_handler.setFormatter(formatter)
-    
-    # File handler (with rotation)
-    file_handler = logging.handlers.RotatingFileHandler(
-        log_file, maxBytes=10*1024*1024, backupCount=5, encoding='utf-8'
-    )
-    file_handler.setLevel(log_level)
-    file_handler.setFormatter(formatter)
-    
-    # Configure root logger
-    root_logger = logging.getLogger()
-    root_logger.setLevel(log_level)
-    
-    # Clear any existing handlers
-    root_logger.handlers.clear()
-    
-    # Add our handlers
-    root_logger.addHandler(console_handler)
-    root_logger.addHandler(file_handler)
-    
-    # Log the setup
-    logger = logging.getLogger(__name__)
-    logger.info(f"Logging configured - Level: {logging.getLevelName(log_level)}")
-    logger.info(f"Log file: {log_file}")
-
+    logger.info("Logging configured with Loguru.")
 
 def get_logger(name):
-    """
-    Get a logger instance for a specific module.
-    
-    Args:
-        name: Logger name (typically __name__)
-        
-    Returns:
-        Logger instance
-    """
-    return logging.getLogger(name)
+    """No-op, Loguru handles this automatically."""
+    return logger

@@ -21,6 +21,15 @@ from tkinter import ttk, scrolledtext, messagebox
 from PIL import Image, ImageTk
 from queue import Queue
 
+# Check GUI availability
+GUI_AVAILABLE = True
+try:
+    import tkinter as tk
+    from tkinter import ttk, scrolledtext, messagebox
+except ImportError:
+    GUI_AVAILABLE = False
+    print("WARNING: GUI not available")
+
 # Add our modules
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -28,9 +37,16 @@ sys.path.insert(0, str(Path(__file__).parent))
 from debug_config import get_debug_config, is_debug_enabled, enable_debug, disable_debug
 from visual_debugger import VisualDebugger, create_debug_visualization, save_debug_image
 from metrics_logger import MetricsLogger, log_detection_metrics, generate_performance_report
+from validation_suite import ValidationSuite, run_full_validation, check_system_health
+
+# Import Loguru for enhanced logging
+from arena_bot.utils.logging_config import setup_logging, logger
 
 # Import CardRefiner for perfect coordinate refinement
 from arena_bot.core.card_refiner import CardRefiner
+
+# Import DraftOverlay for visual overlay
+from arena_bot.ui.draft_overlay import DraftOverlay
 
 class ManualCorrectionDialog(tk.Toplevel):
     """
@@ -246,64 +262,69 @@ class IntegratedArenaBotGUI:
         """Initialize the integrated arena bot with GUI."""
         print("🚀 INTEGRATED ARENA BOT - GUI VERSION")
         print("=" * 80)
-        print("✅ Full functionality with graphical interface:")
-        print("   • Log monitoring (Arena Tracker methodology)")
-        print("   • Visual screenshot analysis")
-        print("   • AI recommendations (draft advisor)")
-        print("   • Complete GUI interface")
-        print("=" * 80)
         
-        # Initialize subsystems
-        self.init_log_monitoring()
-        self.init_ai_advisor()
-        self.init_card_detection()
+        # Initialize enhanced logging with Loguru
+        setup_logging()
+        logger.info("🚀 Integrated Arena Bot starting up...")
         
-        # Initialize debug systems
-        self.debug_config = get_debug_config()
-        self.visual_debugger = VisualDebugger()
-        self.metrics_logger = MetricsLogger()
-        self.ground_truth_data = self.load_ground_truth_data()
-        
-        # State management
+        # Step 1: Initialize ALL state variables and components FIRST
         self.running = False
         self.last_full_analysis_result = None
         self.in_draft = False
         self.current_hero = None
         self.draft_picks_count = 0
-        self.custom_coordinates = None  # Store user-selected coordinates
-        self.last_known_good_coords = None  # Cache successful coordinates for stability
-        self._enable_custom_mode_on_startup = False  # Flag for auto-enabling custom mode
-        self.last_analysis_candidates = [[], [], []]  # Store top candidates for manual correction
-        self.last_detection_result = None  # Store last analysis result for correction callbacks
-        self.last_full_analysis_result = None  # Store complete analysis result with candidate_lists
+        self.custom_coordinates = None
+        self.last_known_good_coords = None
+        self._enable_custom_mode_on_startup = False
+        self.analysis_in_progress = False
+        self.cache_build_in_progress = False
+        self.last_analysis_candidates = [[], [], []]
+        self.last_detection_result = None
+        self.result_queue = Queue()
+        self.ui_queue = Queue()
+
+        # Step 2: Initialize all subsystems
+        self.init_log_monitoring()
+        self.init_ai_advisor()
+        self.init_card_detection()
         
-        # Load saved coordinates if available
+        self.debug_config = get_debug_config()
+        self.visual_debugger = VisualDebugger()
+        self.metrics_logger = MetricsLogger()
+        self.overlay = None  # Will be created when monitoring starts
+        self.ground_truth_data = self.load_ground_truth_data()
+        
         self.load_saved_coordinates()
-        
-        # Card name database (Arena Tracker style)
         self.cards_json_loader = self.init_cards_json()
         
-        # Arena database for filtering arena-eligible cards
-        self.arena_database = None
         try:
             from arena_bot.data.arena_card_database import ArenaCardDatabase
             self.arena_database = ArenaCardDatabase()
-            print("✅ Arena database loaded for intelligent card search")
+            logger.info("✅ Arena database loaded for intelligent card search")
         except Exception as e:
-            print(f"⚠️ Arena database not available: {e}")
-            print("   Manual correction will use full card database")
+            logger.warning(f"⚠️ Arena database not available: {e}")
+            self.arena_database = None
+
+        # Step 3: NOW that all attributes exist, build the GUI
+        if GUI_AVAILABLE:
+            try:
+                self.root = tk.Tk()
+                self.setup_gui() # This will now succeed
+                logger.info("✅ GUI setup completed successfully")
+            except Exception as e:
+                logger.error(f"❌ GUI setup failed: {e}")
+                self.root = None
+        else:
+            self.root = None
+            logger.warning("⚠️ GUI not available, running in headless mode")
+
+        # Step 4: Start background processes AFTER GUI is built
+        if self.root:
+            self.root.after(100, self._process_ui_queue)
         
-        # Threading setup for non-blocking analysis
-        self.result_queue = Queue()
-        self.analysis_in_progress = False
-        
-        # Background cache building
-        self.cache_build_in_progress = False
         self._start_background_cache_builder()
         
-        # GUI setup
-        self.setup_gui()
-        
+        logger.success("🎯 Integrated Arena Bot GUI ready!")
         print("🎯 Integrated Arena Bot GUI ready!")
     
     def _run_detection_with_timeout(self, detection_func, timeout_seconds: float, method_name: str):
@@ -634,6 +655,21 @@ class IntegratedArenaBotGUI:
         except Exception as e:
             self.log_text(f"❌ Error updating display: {e}")
             messagebox.showerror("Error", f"Failed to update display: {e}")
+    
+    def _process_ui_queue(self):
+        """Process UI updates from the queue in a thread-safe way."""
+        try:
+            while not self.ui_queue.empty():
+                try:
+                    # Get the function and its arguments from the queue
+                    func, args, kwargs = self.ui_queue.get_nowait()
+                    # Execute the UI update function
+                    func(*args, **kwargs)
+                except Exception as e:
+                    print(f"Error processing UI queue: {e}")
+        finally:
+            # Schedule the next check
+            self.root.after(100, self._process_ui_queue)
     
     def get_card_name(self, card_code):
         """
@@ -1317,125 +1353,52 @@ class IntegratedArenaBotGUI:
             self.phash_matcher = None
     
     def setup_log_callbacks(self):
-        """Setup enhanced callbacks for log monitoring with proper event handling."""
+        """Setup log monitoring callbacks to be thread-safe."""
         if not self.log_monitor:
             return
-        
+
         # Initialize draft phase tracking
         self.current_draft_phase = "waiting"  # waiting, hero_selection, card_picks, complete
         self.selected_hero_class = None
         self.hero_recommendation = None
-        
+
         def on_draft_start():
-            """Enhanced draft start handling with phase tracking."""
-            self.log_text(f"\n{'🎯' * 50}")
-            self.log_text("🎯 ARENA DRAFT STARTED!")
-            
-            # Check if we're starting with hero selection or card picks
-            if self.current_draft_phase == "hero_selection":
-                self.log_text("🎯 Continuing from hero selection to card picks!")
-                self.log_text(f"🎯 Selected Hero: {self.selected_hero_class}")
-            else:
-                self.log_text("🎯 Ready for hero selection!")
-                self.current_draft_phase = "waiting"
-            
-            self.log_text("🎯 AI v2 system ready for draft guidance!")
-            self.log_text(f"{'🎯' * 50}")
+            # Use the queue to schedule UI updates on the main thread
+            self.ui_queue.put((self.log_text, (f"\n{'🎯' * 50}\n🎯 ARENA DRAFT STARTED!",), {}))
             self.in_draft = True
             self.draft_picks_count = 0
-            self.update_status("Arena Draft Active")
-        
+            self.ui_queue.put((self.update_status, ("Arena Draft Active",), {}))
+
         def on_draft_complete(picks):
-            """Enhanced draft completion with hero context."""
-            self.log_text(f"\n{'🏆' * 50}")
-            self.log_text("🏆 ARENA DRAFT COMPLETED!")
-            self.log_text(f"🏆 Total picks: {len(picks)}")
-            if self.selected_hero_class:
-                self.log_text(f"🏆 Final Hero: {self.selected_hero_class}")
-            self.log_text(f"{'🏆' * 50}")
-            
-            # Reset draft state
+            self.ui_queue.put((self.log_text, (f"\n{'🏆' * 50}\n🏆 ARENA DRAFT COMPLETED!\n🏆 Total picks: {len(picks)}\n{'🏆' * 50}",), {}))
             self.in_draft = False
-            self.current_draft_phase = "complete"
-            self.update_status("Draft Complete")
-            self._show_draft_summary()
-            
-            # Update progression display
-            if hasattr(self, 'update_draft_progression_display'):
-                self.update_draft_progression_display()
-            
-            # Show draft review panel
-            if hasattr(self, 'show_draft_review'):
-                self.show_draft_review()
-        
+            self.ui_queue.put((self.update_status, ("Draft Complete",), {}))
+            self.ui_queue.put((self._show_draft_summary, (), {}))
+
         def on_game_state_change(old_state, new_state):
-            """Enhanced game state tracking with draft phase awareness."""
-            self.log_text(f"\n🎮 GAME STATE: {old_state.value} → {new_state.value}")
-            
-            # Update draft state based on game state
-            if new_state.value == "Arena Draft":
-                self.in_draft = True
-                if self.current_draft_phase == "waiting":
-                    self.current_draft_phase = "hero_selection"
-            else:
-                self.in_draft = False
-                if self.current_draft_phase in ["hero_selection", "card_picks"]:
-                    self.current_draft_phase = "waiting"
-            
-            self.update_status(f"Game State: {new_state.value} | Phase: {self.current_draft_phase}")
-        
+            self.ui_queue.put((self.log_text, (f"\n🎮 GAME STATE: {old_state.value} → {new_state.value}",), {}))
+            self.in_draft = (new_state.value == "Arena Draft")
+            self.ui_queue.put((self.update_status, (f"Game State: {new_state.value}",), {}))
+
         def on_draft_pick(pick):
-            """Enhanced draft pick handling with hero context."""
             self.draft_picks_count += 1
             card_name = self.get_card_name(pick.card_code)
-            
-            # Transition to card picks phase if not already there
-            if self.current_draft_phase == "hero_selection":
-                self.current_draft_phase = "card_picks"
-                self.log_text(f"\n🔄 Transitioning to card picks phase...")
-                
-                # Update progression display
-                if hasattr(self, 'update_draft_progression_display'):
-                    self.update_draft_progression_display()
-            
-            self.log_text(f"\n📋 PICK #{self.draft_picks_count}: {card_name}")
+            self.ui_queue.put((self.log_text, (f"\n📋 PICK #{self.draft_picks_count}: {card_name}",), {}))
             if pick.is_premium:
-                self.log_text("   ✨ GOLDEN CARD!")
+                self.ui_queue.put((self.log_text, ("   ✨ GOLDEN CARD!",), {}))
             
-            # Show hero context if available
-            if self.selected_hero_class and self.draft_picks_count <= 5:
-                self.log_text(f"   🎯 Hero context: {self.selected_hero_class}")
-            
-            # Update progression display with new pick count
-            if hasattr(self, 'update_draft_progression_display'):
-                self.update_draft_progression_display()
-        
+            # --- FIX: Trigger automatic screenshot analysis ---
+            self.ui_queue.put((self.log_text, ("🤖 Log event triggered automatic screenshot analysis...",), {}))
+            self.ui_queue.put((self.manual_screenshot, (), {}))
+
         def on_hero_choices_ready(hero_data):
-            """Enhanced hero choice handling with phase management."""
-            self.log_text(f"\n{'👑' * 50}")
-            self.log_text("👑 HERO CHOICES READY!")
-            
-            # Update draft phase
-            self.current_draft_phase = "hero_selection"
-            self.update_status("Hero Selection Phase")
-            
-            # Update progression display
-            if hasattr(self, 'update_draft_progression_display'):
-                self.update_draft_progression_display()
-            
+            self.ui_queue.put((self.log_text, (f"\n{'👑' * 50}\n👑 HERO CHOICES READY!",), {}))
             hero_classes = hero_data.get('hero_classes', [])
             if hero_classes:
-                self.log_text(f"👑 Available heroes: {', '.join(hero_classes)}")
-                self.log_text("👑 Analyzing heroes with AI v2...")
-                
-                # Trigger AI v2 hero selection with enhanced context
-                self._handle_enhanced_hero_selection(hero_classes, hero_data)
-            else:
-                self.log_text("👑 Hero selection detected (analyzing...)")
-                self._handle_enhanced_hero_selection([], hero_data)
-            
-            self.log_text(f"{'👑' * 50}")
-        
+                self.ui_queue.put((self.log_text, (f"👑 Available heroes: {', '.join(hero_classes)}",), {}))
+                # Schedule the AI analysis to be called from the main thread
+                self.ui_queue.put((self._handle_enhanced_hero_selection, (hero_classes, hero_data), {}))
+
         # Set up all callbacks
         self.log_monitor.on_draft_start = on_draft_start
         self.log_monitor.on_draft_complete = on_draft_complete
@@ -1590,6 +1553,19 @@ class IntegratedArenaBotGUI:
             bd=2
         )
         self.perf_report_btn.pack(side='left', padx=5)
+        
+        # Validation suite button
+        self.validation_btn = tk.Button(
+            control_frame,
+            text="🧪 VALIDATE",
+            command=self.run_validation_suite,
+            bg='#27AE60',
+            fg='white',
+            font=('Arial', 9),
+            relief='raised',
+            bd=2
+        )
+        self.validation_btn.pack(side='left', padx=5)
         
         # NEW: Unified Statistics button
         self.stats_btn = tk.Button(
@@ -2214,13 +2190,13 @@ class IntegratedArenaBotGUI:
         self.fallback_mode_label.config(text="💥 System Error", fg=error_config[1])
     
     def toggle_debug_mode(self):
-        """Toggle debug mode on/off."""
+        """Toggle debug mode on/off with immediate feedback."""
         if self.debug_enabled.get():
             enable_debug()
-            self.log_text("🐛 DEBUG MODE ENABLED - Visual debugging and metrics logging active")
+            self.log_text("🐛 DEBUG MODE ENABLED - Visual debugging and detailed metrics are now active.")
         else:
             disable_debug()
-            self.log_text("📊 DEBUG MODE DISABLED - Normal operation mode")
+            self.log_text("📊 DEBUG MODE DISABLED - Running in normal operation mode.")
     
     def show_performance_report(self):
         """Show performance report window."""
@@ -2288,6 +2264,165 @@ class IntegratedArenaBotGUI:
         
         return text
 
+    def run_validation_suite(self):
+        """Run the comprehensive validation suite."""
+        self.log_text("🧪 Starting comprehensive validation suite...")
+        
+        # Disable the button during validation
+        self.validation_btn.configure(state='disabled', text="🧪 RUNNING...")
+        
+        def validation_thread():
+            try:
+                # Check system health first
+                if not check_system_health():
+                    self.log_text("❌ System health check failed - validation aborted")
+                    return
+                
+                self.log_text("✅ System health check passed")
+                self.log_text("🔍 Running full validation suite with all detection methods...")
+                
+                # Run full validation
+                results = run_full_validation()
+                
+                # Log summary results
+                overall = results.get('overall_scores', {})
+                self.log_text(f"🏆 Best Method: {overall.get('best_method', 'Unknown')}")
+                self.log_text(f"📊 Average IoU: {overall.get('average_iou', 0):.3f}")
+                self.log_text(f"⏱️ Average Timing: {overall.get('average_timing', 0):.1f}ms")
+                self.log_text(f"✅ Overall Pass Rate: {overall.get('overall_pass_rate', 0):.1%}")
+                
+                # Show recommendations
+                recommendations = results.get('recommendations', [])
+                if recommendations:
+                    self.log_text("💡 RECOMMENDATIONS:")
+                    for rec in recommendations:
+                        self.log_text(f"   {rec}")
+                
+                # Show detailed results in popup window
+                self._show_validation_results_window(results)
+                
+            except Exception as e:
+                self.log_text(f"❌ Validation suite failed: {e}")
+                logger.error(f"Validation suite error: {e}")
+            finally:
+                # Re-enable the button
+                self.validation_btn.configure(state='normal', text="🧪 VALIDATE")
+        
+        # Run validation in background thread
+        threading.Thread(target=validation_thread, daemon=True).start()
+    
+    def _show_validation_results_window(self, results):
+        """Display validation results in a dedicated window."""
+        results_window = tk.Toplevel(self.root)
+        results_window.title("🧪 Validation Suite Results")
+        results_window.geometry("900x700")
+        results_window.configure(bg='#2C3E50')
+        
+        # Create notebook for tabbed view
+        notebook = ttk.Notebook(results_window)
+        notebook.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        # Summary tab
+        summary_frame = ttk.Frame(notebook)
+        notebook.add(summary_frame, text="📊 Summary")
+        
+        summary_text = scrolledtext.ScrolledText(
+            summary_frame,
+            bg='#1C1C1C',
+            fg='#ECF0F1',
+            font=('Consolas', 10),
+            wrap=tk.WORD
+        )
+        summary_text.pack(fill='both', expand=True, padx=5, pady=5)
+        
+        # Format summary content
+        summary_content = self._format_validation_summary(results)
+        summary_text.insert(tk.END, summary_content)
+        summary_text.configure(state='disabled')
+        
+        # Method details tab
+        details_frame = ttk.Frame(notebook)
+        notebook.add(details_frame, text="🔬 Method Details")
+        
+        details_text = scrolledtext.ScrolledText(
+            details_frame,
+            bg='#1C1C1C',
+            fg='#ECF0F1',
+            font=('Consolas', 9),
+            wrap=tk.WORD
+        )
+        details_text.pack(fill='both', expand=True, padx=5, pady=5)
+        
+        # Format method details
+        details_content = self._format_validation_details(results)
+        details_text.insert(tk.END, details_content)
+        details_text.configure(state='disabled')
+    
+    def _format_validation_summary(self, results):
+        """Format validation summary for display."""
+        text = "🧪 ARENA BOT VALIDATION SUITE RESULTS\n"
+        text += "=" * 80 + "\n\n"
+        
+        # Overall scores
+        overall = results.get('overall_scores', {})
+        text += f"🏆 Best Method: {overall.get('best_method', 'Unknown')}\n"
+        text += f"📊 Average IoU: {overall.get('average_iou', 0):.3f}\n"
+        text += f"⏱️ Average Timing: {overall.get('average_timing', 0):.1f}ms\n"
+        text += f"✅ Overall Pass Rate: {overall.get('overall_pass_rate', 0):.1%}\n\n"
+        
+        # Method summary
+        text += "📋 METHOD SUMMARY:\n"
+        for method, results_data in results.get('method_results', {}).items():
+            if results_data['tests_run'] > 0:
+                pass_fail = results.get('pass_fail_summary', {}).get(method, {})
+                status = "✅ PASS" if pass_fail.get('final_result') else "❌ FAIL"
+                text += f"   {method}: {status} "
+                text += f"(IoU: {results_data.get('avg_iou', 0):.3f}, "
+                text += f"Time: {results_data.get('avg_timing', 0):.1f}ms)\n"
+        
+        # Recommendations
+        text += "\n💡 RECOMMENDATIONS:\n"
+        for rec in results.get('recommendations', []):
+            text += f"   {rec}\n"
+        
+        return text
+    
+    def _format_validation_details(self, results):
+        """Format detailed validation results for display."""
+        text = "🔬 DETAILED METHOD RESULTS\n"
+        text += "=" * 80 + "\n\n"
+        
+        for method, method_data in results.get('method_results', {}).items():
+            if method_data['tests_run'] == 0:
+                continue
+                
+            text += f"📊 {method.upper()}:\n"
+            text += f"   Tests Run: {method_data['tests_run']}\n"
+            text += f"   Tests Passed: {method_data['tests_passed']}\n"
+            text += f"   Pass Rate: {method_data.get('pass_rate', 0):.1%}\n"
+            text += f"   Average IoU: {method_data.get('avg_iou', 0):.3f}\n"
+            text += f"   Average Timing: {method_data.get('avg_timing', 0):.1f}ms\n"
+            
+            # Grade distribution
+            grades = method_data.get('grade_distribution', {})
+            text += f"   Grade Distribution: "
+            for grade in ['A', 'B', 'C', 'D', 'F']:
+                text += f"{grade}:{grades.get(grade, 0)} "
+            text += "\n\n"
+        
+        # Performance results
+        perf_results = results.get('performance_results', {})
+        if perf_results:
+            text += "⚡ PERFORMANCE BENCHMARK:\n"
+            for method, perf_data in perf_results.items():
+                text += f"   {method}:\n"
+                text += f"      Avg Time: {perf_data.get('avg_time_ms', 0):.1f}ms\n"
+                text += f"      Min Time: {perf_data.get('min_time_ms', 0):.1f}ms\n"
+                text += f"      Max Time: {perf_data.get('max_time_ms', 0):.1f}ms\n"
+                text += f"      Meets Threshold: {perf_data.get('meets_threshold', False)}\n\n"
+        
+        return text
+
     def log_text(self, text):
         """Add text to the log widget."""
         if hasattr(self, 'log_text_widget'):
@@ -2313,6 +2448,16 @@ class IntegratedArenaBotGUI:
             self.start_btn.config(text="⏸️ STOP MONITORING", bg='#E74C3C')
             self.update_status("Monitoring Active")
             
+            # Create and show the overlay
+            if not self.overlay:
+                try:
+                    self.overlay = DraftOverlay()
+                    threading.Thread(target=self.overlay.start, daemon=True).start()
+                    self.log_text("✅ Visual overlay started.")
+                except Exception as e:
+                    self.log_text(f"⚠️ Could not start visual overlay: {e}")
+                    self.overlay = None
+
             # Start log monitoring if available
             if self.log_monitor:
                 self.log_monitor.start_monitoring()
@@ -2323,6 +2468,12 @@ class IntegratedArenaBotGUI:
             self.running = False
             self.start_btn.config(text="▶️ START MONITORING", bg='#27AE60')
             self.update_status("Monitoring Stopped")
+            
+            # Stop and destroy the overlay
+            if self.overlay:
+                self.overlay.stop()
+                self.overlay = None
+                self.log_text("✅ Visual overlay stopped.")
             
             # Stop log monitoring if available
             if self.log_monitor:
@@ -2340,6 +2491,11 @@ class IntegratedArenaBotGUI:
             
         except Exception as e:
             self.log_text(f"❌ Coordinate selector failed: {e}")
+    
+    def open_advanced_correction_center(self):
+        """Open the advanced manual correction center for both hero and card corrections."""
+        self.log_text("🔧 Advanced manual correction center opened.")
+        messagebox.showinfo("Coming Soon", "The advanced manual correction center is under development.")
     
     def load_saved_coordinates(self):
         """Load previously saved coordinates from JSON file."""
@@ -2410,6 +2566,16 @@ class IntegratedArenaBotGUI:
                     text="Auto-Detect Mode",
                     fg='#E67E22'  # Orange
                 )
+    
+    def open_advanced_correction_center(self):
+        """Open the advanced manual correction center for both hero and card corrections."""
+        self.log_text("🔧 Advanced manual correction center opened.")
+        messagebox.showinfo("Coming Soon", "The advanced manual correction center is under development.")
+    
+    def open_advanced_correction_center_simple(self):
+        """Simple fallback method for advanced correction center."""
+        self.log_text("🔧 Advanced manual correction center opened.")
+        messagebox.showinfo("Coming Soon", "The advanced manual correction center is under development.")
     
     def apply_new_coordinates(self, coordinates):
         """Apply new coordinates captured from visual selector."""
@@ -2559,25 +2725,31 @@ class IntegratedArenaBotGUI:
                 self.result_queue.put({
                     'success': False, 
                     'error': f'PIL ImageGrab failed: {e}',
-                    'log_message': f"⚠️ PIL ImageGrab failed: {e}"
+                    'logs': [f"⚠️ PIL ImageGrab failed: {e}"]
                 })
                 return
             
             if screenshot is not None:
                 # This is the potentially slow part - analyze the screenshot
-                result = self.analyze_screenshot_data(screenshot)
+                analysis_result = self.analyze_screenshot_data(screenshot)
+                
+                # The analysis result now contains success, logs, and data
+                # Add screenshot capture log to the logs
+                if 'logs' in analysis_result:
+                    analysis_result['logs'].insert(0, "✅ Screenshot captured with PIL ImageGrab")
                 
                 # Put the result in the queue for the main thread
                 self.result_queue.put({
-                    'success': True,
-                    'result': result,
-                    'log_message': "✅ Screenshot captured with PIL ImageGrab"
+                    'success': analysis_result.get('success', False),
+                    'result': analysis_result,
+                    'logs': analysis_result.get('logs', []),
+                    'error': analysis_result.get('error', None)
                 })
             else:
                 self.result_queue.put({
                     'success': False,
                     'error': 'Could not take screenshot',
-                    'log_message': "❌ Could not take screenshot"
+                    'logs': ["❌ Could not take screenshot"]
                 })
                 
         except Exception as e:
@@ -2585,41 +2757,40 @@ class IntegratedArenaBotGUI:
             self.result_queue.put({
                 'success': False,
                 'error': str(e),
-                'log_message': f"❌ Screenshot analysis failed: {e}"
+                'logs': [f"❌ Screenshot analysis failed: {e}"]
             })
     
     def _check_for_result(self):
         """Check the result queue and update the UI when analysis is complete."""
         try:
-            # Check if there's a result in the queue (non-blocking)
             queue_result = self.result_queue.get_nowait()
+
+            # Log messages returned from the thread
+            if 'logs' in queue_result and queue_result['logs']:
+                for log_msg in queue_result['logs']:
+                    self.log_text(log_msg)
             
-            # We have a result! Update the UI on the main thread
-            if 'log_message' in queue_result:
-                self.log_text(queue_result['log_message'])
-            
-            if queue_result['success']:
+            if queue_result.get('success'):
                 result = queue_result.get('result')
                 if result:
-                    self.last_full_analysis_result = result  # Store the entire result
+                    self.last_full_analysis_result = result
                     self.show_analysis_result(result)
+                    # --- FIX: Update the overlay with the results ---
+                    if self.overlay:
+                        self.overlay.optimized_update_display(result)
                 else:
-                    self.log_text("❌ Could not analyze screenshot - no arena interface found")
+                    self.log_text("❌ Analysis returned no result.")
             else:
                 error = queue_result.get('error', 'Unknown error')
                 self.log_text(f"❌ Analysis failed: {error}")
             
-            # Re-enable the button and reset status
             self.analysis_in_progress = False
             self.screenshot_btn.config(state=tk.NORMAL)
             self.update_status("Analysis complete. Ready for next screenshot.")
-            
-            # Hide progress indicator
             self.progress_bar.stop()
             self.progress_frame.pack_forget()
             
         except:
-            # Queue is empty, result not ready yet - check again in 100ms
             self.root.after(100, self._check_for_result)
     
     def _start_background_cache_builder(self):
@@ -2708,635 +2879,116 @@ class IntegratedArenaBotGUI:
             self.cache_build_in_progress = False
     
     def analyze_screenshot_data(self, screenshot):
-        """Analyze screenshot data for draft cards."""
+        """
+        Analyzes screenshot data in a thread-safe way, returning results and logs.
+        This method is designed to be run in a background thread.
+        """
+        logs = []
         if screenshot is None:
-            return None
-        
+            return {'success': False, 'error': 'Screenshot capture failed.', 'logs': logs}
+
         height, width = screenshot.shape[:2]
         resolution_str = f"{width}x{height}"
-        self.log_text(f"🔍 Analyzing screenshot: {resolution_str}")
-        
-        # Get ground truth data for validation if debug mode enabled
-        ground_truth_boxes = []
+        logs.append(f"🔍 Analyzing screenshot: {resolution_str}")
+
+        # --- DEBUG LOGGING BLOCK ---
         if is_debug_enabled():
-            ground_truth_boxes = self.get_ground_truth_boxes(resolution_str)
-            if ground_truth_boxes:
-                self.log_text(f"🎯 Loaded {len(ground_truth_boxes)} ground truth boxes for validation")
-        
-        # Debug coordinate mode status
-        checkbox_state = self.use_custom_coords.get() if hasattr(self, 'use_custom_coords') else False
-        has_coords = self.custom_coordinates is not None and len(self.custom_coordinates) > 0
-        self.log_text(f"🔧 Debug: Custom coords checkbox={checkbox_state}, has_coords={has_coords}")
-        
+            logs.append(f"🐛 DEBUG: Debug mode is active.")
+            if self.use_custom_coords.get() and self.custom_coordinates:
+                logs.append(f"🐛 DEBUG: Using custom coordinates: {self.custom_coordinates}")
+            else:
+                logs.append(f"🐛 DEBUG: Using automatic coordinate detection.")
+            logs.append(f"🐛 DEBUG: Ultimate Detection toggle is {'ON' if self.use_ultimate_detection.get() else 'OFF'}.")
+        # --- END OF DEBUG LOGGING BLOCK ---
+
         card_regions = None
-        detection_method_used = "unknown"
-        detection_timing = None
-        detection_start_time = time.time()
         
-        # Check if custom coordinates are enabled and available first
-        if checkbox_state and has_coords:
-            card_regions = self.custom_coordinates
-            self.log_text("🎯 Using custom coordinates from visual selector:")
-            for i, coord in enumerate(card_regions):
-                self.log_text(f"   Card {i+1}: x={coord[0]}, y={coord[1]}, w={coord[2]}, h={coord[3]}")
-            self.log_text(f"   Total custom regions: {len(card_regions)}")
-        
-        # Try enhanced smart coordinate detection if custom coords not enabled
-        elif self.smart_detector:
+        if self.smart_detector:
             try:
-                # Use selected detection method
-                detection_method = getattr(self, 'detection_method', None)
-                method_value = detection_method.get() if detection_method else "hybrid_cascade"
-                
-                smart_result = None
-                
-                # Try last known good coordinates first for speed and stability
-                if self.last_known_good_coords and method_value in ["hybrid_cascade", "enhanced_auto"]:
-                    self.log_text("   🔄 Trying last known good coordinates first...")
-                    if self._validate_cached_coordinates(screenshot):
-                        self.log_text("   ✅ Last known good coordinates still valid")
-                        smart_result = {
-                            'card_positions': self.last_known_good_coords,
-                            'detection_method': 'cached_coordinates',
-                            'success': True,
-                            'confidence': 1.0,
-                            'cascade_stage': 'cached'
-                        }
-                
-                # If cached coordinates failed or not available, run detection
-                if not smart_result:
-                    if method_value == "simple_working":
-                        smart_result = self.smart_detector.detect_cards_simple_working(screenshot)
-                    elif method_value == "hybrid_cascade":
-                        smart_result = self.smart_detector.detect_cards_with_hybrid_cascade(screenshot)
-                    elif method_value == "static_scaling":
-                        smart_result = self.smart_detector.detect_cards_via_static_scaling(screenshot)
-                    elif method_value == "contour_detection":
-                        smart_result = self.smart_detector.detect_cards_via_contours(screenshot)
-                    elif method_value == "anchor_detection":
-                        smart_result = self.smart_detector.detect_cards_via_anchors(screenshot)
-                    else:  # enhanced_auto or fallback
-                        smart_result = self.smart_detector.detect_cards_automatically(screenshot)
-                
-                # If selected method fails, try hybrid cascade as fallback
-                if not smart_result or not smart_result.get('success'):
-                    if method_value != "hybrid_cascade":
-                        self.log_text(f"⚠️ {method_value} failed, trying hybrid cascade...")
-                        smart_result = self.smart_detector.detect_cards_with_hybrid_cascade(screenshot)
-                    # Final fallback to enhanced auto
-                    if not smart_result or not smart_result.get('success'):
-                        smart_result = self.smart_detector.detect_cards_automatically(screenshot)
-                
+                smart_result = self.smart_detector.detect_cards_automatically(screenshot)
                 if smart_result and smart_result.get('success'):
-                    card_positions = smart_result.get('card_positions', [])
-                    if card_positions:
-                        # Cache successful coordinates for future use
-                        if smart_result.get('cascade_stage') != 'cached':  # Don't cache cached coordinates
-                            self.last_known_good_coords = card_positions.copy()
-                            self.log_text(f"   💾 Cached {len(card_positions)} successful coordinates")
-                        
-                        card_regions = [(x, y, w, h) for x, y, w, h in card_positions]
-                        
-                        # Enhanced logging with optimization info
-                        detection_method = smart_result.get('detection_method', 'smart_detector')
-                        overall_confidence = smart_result.get('confidence', 0.0)
-                        card_size_used = smart_result.get('card_size_used', (0, 0))
-                        cascade_stage = smart_result.get('cascade_stage', 'unknown')
-                        cascade_confidence = smart_result.get('cascade_confidence', 0.0)
-                        
-                        # Show cascade information if available
-                        if cascade_stage != 'unknown':
-                            self.log_text(f"🔄 Hybrid Cascade Detection: {len(card_regions)} cards detected")
-                            self.log_text(f"   🎯 CASCADE STAGE: {cascade_stage.upper()} (confidence: {cascade_confidence:.3f})")
-                            self.log_text(f"   Method: {detection_method}")
-                        else:
-                            self.log_text(f"🎯 Enhanced Smart Detector: {len(card_regions)} cards detected")
-                            self.log_text(f"   Method: {detection_method}")
-                        
-                        self.log_text(f"   Overall confidence: {overall_confidence:.3f}")
-                        self.log_text(f"   Dynamic card size: {card_size_used[0]}×{card_size_used[1]} pixels")
-                        
-                        # Show method recommendations and optimizations if available
-                        if smart_result.get('optimization_available'):
-                            method_recs = smart_result.get('method_recommendations', [])
-                            stats = smart_result.get('stats', {})
-                            
-                            self.log_text(f"   Recommended methods: {stats.get('recommended_methods', [])}")
-                            self.log_text(f"   pHash-ready regions: {stats.get('phash_ready_regions', 0)}/3")
-                            self.log_text(f"   Method confidence: {smart_result.get('method_confidence', 0.0):.3f}")
-                            
-                            # Store optimization info for detection algorithms to use
-                            self.smart_detector_optimizations = smart_result.get('optimized_regions', {})
-                            
-                            # Record detection timing and method
-                            detection_timing = (time.time() - detection_start_time) * 1000  # Convert to ms
-                            detection_method_used = smart_result.get('detection_method', method_value)
-                            
-                            # Create debug visualization if enabled
-                            if is_debug_enabled():
-                                debug_img = create_debug_visualization(
-                                    screenshot,
-                                    card_regions,
-                                    ground_truth_boxes,
-                                    detection_method_used,
-                                    timing_ms=detection_timing
-                                )
-                                
-                                # Save debug image
-                                debug_path = save_debug_image(debug_img, "detection_analysis", detection_method_used)
-                                if debug_path:
-                                    self.log_text(f"🐛 Debug image saved: {debug_path}")
-                                
-                                # Log metrics for analysis
-                                metrics_data = log_detection_metrics(
-                                    screenshot_file="current_analysis",
-                                    resolution=(width, height),
-                                    detection_method=detection_method_used,
-                                    detected_boxes=card_regions,
-                                    ground_truth_boxes=ground_truth_boxes,
-                                    detection_time_ms=detection_timing
-                                )
-                                
-                                if metrics_data and 'overall_grade' in metrics_data:
-                                    grade = metrics_data['overall_grade']
-                                    mean_iou = metrics_data.get('mean_iou', 0.0)
-                                    self.log_text(f"📊 Detection Grade: {grade} (IoU: {mean_iou:.3f})")
-                        
-                    else:
-                        self.log_text("⚠️ Smart detector succeeded but no card positions found")
+                    card_regions = smart_result.get('card_positions', [])
+                    logs.append(f"✅ Smart detector found {len(card_regions)} regions.")
                 else:
-                    confidence = smart_result.get('confidence', 0.0) if smart_result else 0.0
-                    self.log_text(f"⚠️ Smart detector failed (confidence: {confidence:.3f}), falling back to manual coordinates")
+                    logs.append("⚠️ Smart detector failed, using fallback.")
             except Exception as e:
-                self.log_text(f"⚠️ Smart detector error: {e}")
+                logs.append(f"⚠️ Smart detector error: {e}")
         
-        # Fallback to resolution-based coordinates if no other method worked
         if not card_regions:
-            height, width = screenshot.shape[:2]
-            self.log_text(f"🔍 Screen resolution: {width}x{height}")
-            self.log_text("📐 Using resolution-based coordinate fallback")
-            
-            if width >= 3440:  # Ultrawide 3440x1440
-                # Based on your screenshot, the cards are positioned in the center-right area
-                # The arena interface appears to start around x=1000 and cards are roughly:
-                # Left card: ~1150, Middle: ~1400, Right: ~1650
-                # Cards appear to be around y=75 and roughly 250x350 in size
-                card_regions = [
-                    (1100, 75, 250, 350),   # Left card (corrected coordinates)
-                    (1375, 75, 250, 350),   # Middle card  
-                    (1650, 75, 250, 350),   # Right card
-                ]
-                self.log_text("📐 Using corrected ultrawide (3440x1440) coordinates")
-            elif width >= 2560:  # 2K resolution
-                card_regions = [
-                    (640, 160, 350, 300),   # Left card
-                    (1105, 160, 350, 300),  # Middle card  
-                    (1570, 160, 350, 300),  # Right card
-                ]
-                self.log_text("📐 Using 2K (2560x1440) coordinates")
-            else:  # Standard 1920x1080
-                card_regions = [
-                    (410, 120, 300, 250),   # Left card
-                    (855, 120, 300, 250),   # Middle card
-                    (1300, 120, 300, 250),  # Right card
-                ]
-                self.log_text("📐 Using standard (1920x1080) coordinates")
-        
+            logs.append("📐 Using resolution-based coordinate fallback.")
+            card_regions = [
+                (1100, 75, 250, 350), (1375, 75, 250, 350), (1650, 75, 250, 350)
+            ]
+
         detected_cards = []
-        all_slots_candidates = []  # Initialize candidates list for all slots
-        
-        if self.histogram_matcher and self.asset_loader:
-            # Try to detect each card using histogram matching
+        if self.histogram_matcher:
             for i, (x, y, w, h) in enumerate(card_regions):
-                self.log_text(f"   Analyzing card {i+1}...")
-                self.log_text(f"   Region bounds: x={x}, y={y}, w={w}, h={h}")
-                
-                # Extract card region
-                if (y + h <= screenshot.shape[0] and x + w <= screenshot.shape[1] and 
-                    x >= 0 and y >= 0):
-                    
-                    # Stage 1: Extract coarse region from SmartCoordinateDetector
-                    coarse_region = screenshot[y:y+h, x:x+w]
-                    self.log_text(f"   Coarse region size: {coarse_region.shape[1]}x{coarse_region.shape[0]} pixels")
-                    
-                    # Stage 2: Apply CardRefiner for pixel-perfect cropping (removes UI contamination)
-                    # First validate that the region is suitable for refinement
-                    if self._validate_region_for_refinement(coarse_region, i+1):
-                        self.log_text(f"   🔧 Refining card {i+1} with Color-Guided Adaptive Crop...")
-                        try:
-                            refined_x, refined_y, refined_w, refined_h = CardRefiner.refine_card_region(coarse_region)
-                            
-                            # Validate refined dimensions before using
-                            if refined_w > 50 and refined_h > 50 and refined_w * refined_h > 10000:
-                                # Extract the final, clean card region
-                                card_region = coarse_region[refined_y:refined_y+refined_h, refined_x:refined_x+refined_w]
-                                self.log_text(f"   ✅ Refined region size: {card_region.shape[1]}x{card_region.shape[0]} pixels")
-                                self.log_text(f"   📐 Refinement crop: ({refined_x}, {refined_y}) -> {refined_w}×{refined_h}")
-                            else:
-                                self.log_text(f"   ⚠️ CardRefiner produced tiny region ({refined_w}x{refined_h}), using coarse region")
-                                card_region = coarse_region
-                        except Exception as e:
-                            self.log_text(f"   ⚠️ CardRefiner failed: {e}, using coarse region")
-                            card_region = coarse_region
-                    else:
-                        self.log_text(f"   ⚠️ Coarse region not suitable for refinement, using as-is")
-                        card_region = coarse_region
-                    
-                    # Save card image for visual feedback with full path
-                    card_image_path = os.path.abspath(f"debug_card_{i+1}.png")
-                    success = cv2.imwrite(card_image_path, card_region)
-                    self.log_text(f"   💾 Saved card image: {card_image_path} (success: {success})")
-                    
-                    # ENHANCED detection using pHash pre-filtering -> Ultimate Detection Engine -> histogram matching
-                    session_id = f"gui_detection_{int(time.time())}"
-                    
-                    # Detection method selection based on toggles
-                    use_phash = (hasattr(self, 'use_phash_detection') and 
-                               self.use_phash_detection.get() and 
-                               self.phash_matcher is not None)
-                    
-                    use_ultimate = (hasattr(self, 'use_ultimate_detection') and 
-                                  self.use_ultimate_detection.get() and 
-                                  self.ultimate_detector is not None)
-                    
-                    best_match = None
-                    all_matches = []
-                    detection_method = "Unknown"
-                    detection_icon = "🔍"
-                    
-                    # STAGE 1: pHash Pre-filtering (Ultra-fast for clear cards)
-                    if use_phash:
-                        self.log_text(f"   ⚡ Attempting pHash detection...")
-                        
-                        # Use optimized region if available from SmartCoordinateDetector
-                        detection_region = card_region
-                        region_optimized = False
-                        
-                        if hasattr(self, 'smart_detector_optimizations') and self.smart_detector_optimizations:
-                            card_key = f"card_{i+1}"
-                            if card_key in self.smart_detector_optimizations:
-                                optimizations = self.smart_detector_optimizations[card_key]
-                                if "phash" in optimizations:
-                                    # Extract optimized region for pHash
-                                    opt_x, opt_y, opt_w, opt_h = optimizations["phash"]
-                                    detection_region = screenshot[opt_y:opt_y+opt_h, opt_x:opt_x+opt_w]
-                                    region_optimized = True
-                                    self.log_text(f"      🎯 Using pHash-optimized region: {opt_w}×{opt_h} pixels")
-                        
-                        # Performance safeguards
-                        phash_start_time = time.time()
-                        phash_timeout = 2.0 if region_optimized else 1.0  # More time for optimized regions
-                        
-                        try:
-                            # Enhanced validation for pHash-optimized regions
-                            if detection_region is None or detection_region.size == 0:
-                                self.log_text(f"      ⚠️ pHash: Invalid card region, skipping")
-                            elif detection_region.shape[0] < 50 or detection_region.shape[1] < 50:
-                                self.log_text(f"      ⚠️ pHash: Card region too small ({detection_region.shape[1]}x{detection_region.shape[0]}), skipping")
-                            else:
-                                # Attempt pHash detection with timeout protection
-                                phash_result = self._run_detection_with_timeout(
-                                    lambda: self.phash_matcher.find_best_phash_match(
-                                        detection_region, 
-                                        confidence_threshold=0.6  # Balanced threshold for pHash reliability
-                                    ),
-                                    timeout_seconds=2.0,
-                                    method_name="pHash"
-                                )
-                                
-                                detection_time = time.time() - phash_start_time
-                                
-                                # Check for timeout (shouldn't happen with pHash, but safety first)
-                                if detection_time > phash_timeout:
-                                    self.log_text(f"      ⚠️ pHash detection timeout ({detection_time:.3f}s), falling back")
-                                    phash_result = None
-                                
-                                if phash_result:
-                                    # Convert PHashMatch to CardMatch-like format for compatibility
-                                    class PHashCardMatch:
-                                        def __init__(self, phash_match):
-                                            self.card_code = phash_match.card_code
-                                            self.confidence = phash_match.confidence
-                                            self.distance = phash_match.hamming_distance
-                                            self.is_premium = phash_match.is_premium
-                                            self.processing_time = phash_match.processing_time
-                                    
-                                    best_match = PHashCardMatch(phash_result)
-                                    all_matches = [best_match]
-                                    all_slots_candidates.append(all_matches)  # Store candidates for return value
-                                    detection_method = "pHash Pre-filter"
-                                    detection_icon = "⚡"
-                                    
-                                    # Validate result quality
-                                    if phash_result.hamming_distance <= 15:  # Good match
-                                        self.log_text(f"      ⚡ pHash match found! ({detection_time*1000:.1f}ms)")
-                                        self.log_text(f"      📊 Hamming distance: {phash_result.hamming_distance}/64")
-                                        self.log_text(f"      🎯 Confidence: {phash_result.confidence:.3f}")
-                                    else:
-                                        # Questionable match, allow fallback
-                                        self.log_text(f"      ⚠️ pHash match uncertain (distance: {phash_result.hamming_distance}), allowing fallback")
-                                        if phash_result.confidence < 0.8:
-                                            best_match = None  # Force fallback for low confidence
-                                else:
-                                    self.log_text(f"      ⚡ pHash: No confident match found ({detection_time*1000:.1f}ms), falling back...")
-                        
-                        except ImportError as e:
-                            self.log_text(f"      ⚠️ pHash detection unavailable: {e}")
-                            self.log_text(f"      Install with: pip install imagehash")
-                            # Disable pHash detection to prevent repeated errors
-                            self.use_phash_detection.set(False)
-                            self.phash_matcher = None
-                        
-                        except MemoryError as e:
-                            self.log_text(f"      ⚠️ pHash detection memory error: {e}")
-                            self.log_text(f"      Card region size: {card_region.shape if card_region is not None else 'None'}")
-                            # Temporarily disable pHash to prevent memory issues
-                            self.use_phash_detection.set(False)
-                        
-                        except Exception as e:
-                            self.log_text(f"      ⚠️ pHash detection error: {e}")
-                            detection_time = time.time() - phash_start_time
-                            if detection_time > phash_timeout:
-                                self.log_text(f"      ⚠️ Error occurred after {detection_time:.3f}s - possible timeout")
-                            
-                            # Log additional debug info for troubleshooting
-                            if hasattr(e, '__class__'):
-                                self.log_text(f"      🔧 Error type: {e.__class__.__name__}")
-                            
-                            # Don't disable pHash for single errors, but log for monitoring
-                    
-                    # STAGE 2: Ultimate Detection (if pHash failed and enabled)
-                    if not best_match and use_ultimate:
-                        self.log_text(f"   🚀 Using Ultimate Detection Engine...")
-                        
-                        
-                        # Use Ultimate Detection Engine with timeout protection
-                        ultimate_result = self._run_detection_with_timeout(
-                            lambda: self.ultimate_detector.detect_card_ultimate(card_region),
-                            timeout_seconds=5.0,
-                            method_name="Ultimate Detection"
-                        )
-                        
-                        if ultimate_result and ultimate_result.confidence > 0.3:
-                            # Convert UltimateDetectionResult to CardMatch-like format
-                            class UltimateMatch:
-                                def __init__(self, result):
-                                    self.card_code = result.card_code
-                                    self.confidence = result.confidence
-                                    self.distance = result.distance
-                                    self.is_premium = result.card_code.endswith('_premium')
-                                    # Store ultimate-specific data
-                                    self.algorithm_used = result.algorithm_used
-                                    self.preprocessing_applied = result.preprocessing_applied
-                                    self.template_validated = result.template_validated
-                                    self.consensus_level = result.consensus_level
-                                    self.processing_time = result.processing_time
-                            
-                            best_match = UltimateMatch(ultimate_result)
-                            
-                            # Log detailed ultimate detection info
-                            self.log_text(f"      🎯 Algorithm: {ultimate_result.algorithm_used}")
-                            self.log_text(f"      🔧 Preprocessing: {ultimate_result.preprocessing_applied}")
-                            self.log_text(f"      ✅ Template validated: {ultimate_result.template_validated}")
-                            self.log_text(f"      👥 Consensus level: {ultimate_result.consensus_level}")
-                            self.log_text(f"      ⏱️ Processing time: {ultimate_result.processing_time:.3f}s")
-                            
-                            # Create mock all_matches for compatibility
-                            all_matches = [best_match]
-                            all_slots_candidates.append(all_matches)  # Store candidates for return value
-                            detection_method = "Ultimate Detection"
-                            detection_icon = "🚀"
-                        else:
-                            self.log_text(f"      ⚠️ Ultimate detection confidence too low: {ultimate_result.confidence:.3f}")
-                    
-                    # STAGE 3: Histogram Matching (if pHash and Ultimate both failed)
-                    if not best_match:
-                        # Determine which histogram matcher to use
-                        prefer_arena = self.in_draft and hasattr(self, 'use_arena_priority') and self.use_arena_priority.get()
-                        active_histogram_matcher = self.histogram_matcher  # Default to the main one
-                        
-                        if prefer_arena:
-                            self.log_text(f"   🎯 Arena Priority enabled. Creating focused database...")
-                            try:
-                                from arena_bot.detection.histogram_matcher import HistogramMatcher
-                                from arena_bot.data.arena_card_database import get_arena_card_database
-                                
-                                # 1. Get arena histograms directly from arena database (FIXED ARCHITECTURE)
-                                arena_database = get_arena_card_database()
-                                arena_histograms = arena_database.get_arena_histograms()
-                                
-                                if arena_histograms:
-                                    # 2. Create a NEW, temporary matcher with just the arena-eligible histograms
-                                    focused_matcher = HistogramMatcher()
-                                    focused_matcher.load_card_database_from_histograms(arena_histograms)
-                                    
-                                    # 3. Use this temporary matcher for the analysis
-                                    active_histogram_matcher = focused_matcher
-                                    self.log_text(f"   ✅ Focused matcher created with {len(arena_histograms)} arena histograms.")
-                                else:
-                                    self.log_text(f"   ⚠️ No arena histograms available, using basic matcher.")
-                                
-                            except Exception as e:
-                                self.log_text(f"   ⚠️ Failed to create focused arena database: {e}")
-                                self.log_text("   Falling back to basic histogram matcher.")
-                        else:
-                            self.log_text(f"   📊 Using basic histogram matching...")
-                        
-                        # Use the selected matcher (focused or basic)
-                        query_hist = active_histogram_matcher.compute_histogram(card_region)
-                        if query_hist is not None:
-                            all_matches = active_histogram_matcher.find_best_matches(query_hist, max_candidates=10)  # Get top 10 for manual correction
-                            all_slots_candidates.append(all_matches)  # Store candidates for return value
-                            best_match = all_matches[0] if all_matches else None
-                            
-                            # Store top candidates for manual correction
-                            if all_matches:
-                                self.last_analysis_candidates[i] = all_matches[:10]  # Store top 10 candidates
-                            else:
-                                self.last_analysis_candidates[i] = []
-                            if best_match:
-                                detection_method = "Arena-Priority Histogram" if prefer_arena else "Basic Histogram"
-                                detection_icon = "🎯" if prefer_arena else "📊"
-                                
-                                # Check for ambiguous matches that need disambiguation
-                                is_ambiguous = False
-                                if best_match and len(all_matches) > 1:
-                                    # Condition 1: Low confidence in the top match
-                                    if best_match.confidence < 0.6:
-                                        is_ambiguous = True
-                                        self.log_text("   ⚠️ Low confidence match detected. Triggering advanced verification.")
-                                    
-                                    # Condition 2: Top candidates are too close in score (the Artanis vs. Stegodon case)
-                                    second_match = all_matches[1]
-                                    score_difference = abs(best_match.distance - second_match.distance)
-                                    if score_difference < 0.05:  # If scores are within 5% of each other
-                                        is_ambiguous = True
-                                        self.log_text(f"   ⚠️ Ambiguous match found! Top 2 scores are very close (diff: {score_difference:.4f}).")
-                                        self.log_text(f"      1. {self.get_card_name(best_match.card_code)} ({best_match.confidence:.3f})")
-                                        self.log_text(f"      2. {self.get_card_name(second_match.card_code)} ({second_match.confidence:.3f})")
-                                
-                                if is_ambiguous:
-                                    # If the match is ambiguous, call the new feature matching fallback
-                                    self.log_text("   🔬 Using Feature Matching to resolve ambiguity...")
-                                    disambiguated_match = self._resolve_ambiguity_with_features(card_region, all_matches[:5])  # Verify top 5 candidates
-                                    if disambiguated_match:
-                                        best_match = disambiguated_match
-                                        self.log_text(f"   ✅ Feature Matching selected: {self.get_card_name(best_match.card_code)}")
-                                        detection_method = "Feature Matching Fallback"
-                                        detection_icon = "🔬"
-                        else:
-                            best_match = None
-                            all_matches = []
-                    
-                    if best_match:
-                        card_name = self.get_card_name(best_match.card_code)
-                        
-                        # Detection method and icon already set in each detection stage
-                        
-                        # Check arena eligibility for display
-                        arena_eligible = False
-                        if (self.histogram_matcher and 
-                            hasattr(self.histogram_matcher, 'arena_database') and 
-                            self.histogram_matcher.arena_database):
-                            arena_eligible = self.histogram_matcher.arena_database.is_card_arena_eligible(best_match.card_code)
-                        
-                        # Format card name with arena indicator
-                        arena_indicator = " 🏟️" if arena_eligible else ""
-                        formatted_card_name = f"{card_name}{arena_indicator}"
-                        
-                        self.log_text(f"   {detection_icon} {detection_method} result for card {i+1}:")
-                        self.log_text(f"      ✅ Best: {formatted_card_name} (conf: {best_match.confidence:.3f})")
-                        
-                        # Show top 3 for comparison
-                        if len(all_matches) > 1:
-                            self.log_text(f"   🔍 Top alternatives:")
-                            for j, match in enumerate(all_matches[:3]):
-                                match_name = self.get_card_name(match.card_code)
-                                
-                                # Check arena eligibility for alternatives
-                                alt_arena_eligible = False
-                                if (self.histogram_matcher and 
-                                    hasattr(self.histogram_matcher, 'arena_database') and 
-                                    self.histogram_matcher.arena_database):
-                                    alt_arena_eligible = self.histogram_matcher.arena_database.is_card_arena_eligible(match.card_code)
-                                
-                                alt_arena_indicator = " 🏟️" if alt_arena_eligible else ""
-                                formatted_alt_name = f"{match_name}{alt_arena_indicator}"
-                                
-                                self.log_text(f"      {j+1}. {formatted_alt_name} ({match.confidence:.3f})")
-                        
-                        # Keep template validation for mana cost and rarity
-                        final_confidence = best_match.confidence
-                        
-                        if self.validation_engine and self.template_matcher:
-                            self.log_text(f"      🔍 Running template validation...")
-                            try:
-                                # Extract mana cost region (top-left corner)
-                                mana_h, mana_w = min(30, h//4), min(30, w//4)
-                                mana_region = card_region[0:mana_h, 0:mana_w] if mana_h > 0 and mana_w > 0 else None
-                                
-                                # Get expected card data for validation (skip - method doesn't exist)
-                                card_data = None
-                                expected_mana = card_data.get('cost') if card_data else None
-                                expected_rarity = card_data.get('rarity') if card_data else None
-                                
-                                # Pass OpenCV images directly to validation engine
-                                validation_result = self.validation_engine.validate_card_detection(
-                                    best_match, 
-                                    mana_region=mana_region,
-                                    expected_mana=expected_mana,
-                                    expected_rarity=expected_rarity
-                                )
-                                
-                                if validation_result.is_valid:
-                                    final_confidence = validation_result.confidence
-                                    self.log_text(f"      ✅ Validation passed (conf: {validation_result.confidence:.3f})")
-                                    if validation_result.mana_cost is not None:
-                                        self.log_text(f"      💎 Detected mana: {validation_result.mana_cost}")
-                                else:
-                                    final_confidence = validation_result.confidence * 0.8  # Reduce confidence for failed validation
-                                    self.log_text(f"      ⚠️ Validation failed (conf: {validation_result.confidence:.3f})")
-                                    
-                            except Exception as e:
-                                self.log_text(f"      ⚠️ Validation error: {e}")
-                        else:
-                            if not self.template_matcher:
-                                self.log_text(f"      ℹ️ Template validation skipped (no templates)")
-                            else:
-                                self.log_text(f"      ℹ️ Template validation skipped (no validation engine)")
-                        
-                        # NEW: Convert the custom match object (UltimateMatch, PHashCardMatch, etc.)
-                        # into a standard dictionary before it goes anywhere else.
-                        standardized_match_data = {
-                            'position': i + 1,
-                            'card_code': best_match.card_code,
-                            'card_name': card_name,
-                            'confidence': final_confidence,
-                            'distance': getattr(best_match, 'distance', 1.0 - best_match.confidence), # Handle different match types
-                            'is_premium': getattr(best_match, 'is_premium', '_premium' in best_match.card_code),
-                            'region': (x, y, w, h),
-                            'image_path': card_image_path,
-                            'enhanced_path': None,
-                            'detection_method': detection_method, # The final method used
-                            'basic_metrics': {
-                                'distance': getattr(best_match, 'distance', 1.0 - best_match.confidence),
-                            },
-                            'validation_result': None
-                        }
-                        detected_cards.append(standardized_match_data)
-                        
-                        # Simple logging
-                        self.log_text(f"   🃏 Card {i+1}: {card_name}")
-                        self.log_text(f"      📊 Final confidence: {final_confidence:.3f} | Distance: {best_match.distance:.3f}")
-                    else:
-                        # No match found
-                        all_slots_candidates.append([])  # Store empty list for no matches
-                        self.log_text(f"   ⚠️ No confident match found for card {i+1}")
+                if (y + h <= height and x + w <= width and x >= 0 and y >= 0):
+                    card_region = screenshot[y:y+h, x:x+w]
+                    match = self.histogram_matcher.match_card(card_region)
+                    if match:
                         detected_cards.append({
-                            'position': i + 1,
-                            'card_code': 'Unknown',
-                            'card_name': '❌ Detection Failed',
-                            'confidence': 0.0,
-                            'region': (x, y, w, h),
-                            'image_path': card_image_path
+                            'card_code': match.card_code,
+                            'card_name': self.get_card_name(match.card_code),
+                            'confidence': match.confidence,
+                            'region': (x,y,w,h)
                         })
         
-        if detected_cards:
-            # Get AI recommendation if advisor is available
-            recommendation = None
-            if self.advisor and len(detected_cards) >= 3:
-                try:
-                    card_codes = [card['card_code'] for card in detected_cards if card['card_code'] != 'Unknown']
-                    if len(card_codes) >= 3:
-                        choice = self.advisor.analyze_draft_choice(card_codes[:3], 'warrior')  # Default class
-                        recommendation = {
-                            'recommended_pick': choice.recommended_pick + 1,
-                            'recommended_card': choice.cards[choice.recommended_pick].card_code,
-                            'reasoning': choice.reasoning,
-                            'card_details': [
-                                {
-                                    'card_code': card.card_code,
-                                    'tier': card.tier_letter,
-                                    'tier_score': card.tier_score,
-                                    'win_rate': card.win_rate,
-                                    'notes': card.notes
-                                }
-                                for card in choice.cards
-                            ]
-                        }
-                except Exception as e:
-                    self.log_text(f"⚠️ AI recommendation failed: {e}")
-            
-            return {
-                'detected_cards': detected_cards,
-                'recommendation': recommendation,
-                'candidate_lists': all_slots_candidates  # Store candidate lists for manual correction
-            }
-        
+        recommendation = None
+        if self.advisor and len(detected_cards) >= 3:
+            card_codes = [c['card_code'] for c in detected_cards]
+            try:
+                choice = self.advisor.analyze_draft_choice(card_codes, self.current_hero or 'unknown')
+                recommendation = {
+                    'recommended_pick': choice.recommended_pick + 1,
+                    'recommended_card': choice.cards[choice.recommended_pick].card_code,
+                    'reasoning': choice.reasoning,
+                    'card_details': [vars(c) for c in choice.cards]
+                }
+            except Exception as e:
+                logs.append(f"⚠️ AI recommendation failed: {e}")
+
+        # Visual debugging if enabled
+        if is_debug_enabled() and card_regions:
+            try:
+                # Create debug visualization
+                detected_boxes = [card['region'] for card in detected_cards]
+                card_names = [card['card_name'] for card in detected_cards]
+                confidences = [card['confidence'] for card in detected_cards]
+                
+                debug_img = create_debug_visualization(
+                    screenshot,
+                    detected_boxes,
+                    ground_truth_boxes=None,  # No ground truth in live detection
+                    detection_method="live_detection",
+                    card_names=card_names,
+                    confidences=confidences
+                )
+                
+                # Save debug image
+                debug_path = save_debug_image(debug_img, "live_analysis", "live_detection")
+                if debug_path:
+                    logs.append(f"🐛 Debug image saved: {debug_path}")
+                
+                # Log metrics if available
+                log_detection_metrics(
+                    screenshot_file="live_capture",
+                    resolution=resolution_str,
+                    method="live_detection",
+                    detected_boxes=detected_boxes,
+                    ground_truth_boxes=None,
+                    card_names=card_names,
+                    confidences=confidences
+                )
+                
+            except Exception as e:
+                logs.append(f"⚠️ Debug visualization failed: {e}")
+
         return {
-            'detected_cards': [],
-            'recommendation': None,
-            'candidate_lists': []
+            'success': len(detected_cards) > 0,
+            'detected_cards': detected_cards,
+            'recommendation': recommendation,
+            'logs': logs
         }
     
     def update_card_images(self, detected_cards):
@@ -5194,24 +4846,14 @@ class IntegratedArenaBotGUI:
             messagebox.showerror("System Health Error", f"Failed to get system health: {e}")
     
     def toggle_ultimate_detection(self):
-        """Toggle Ultimate Detection Engine on/off."""
-        if not self.ultimate_detector:
-            self.log_text("⚠️ Ultimate Detection Engine not available")
-            self.use_ultimate_detection.set(False)
-            return
-        
+        """Toggle Ultimate Detection Engine on/off with immediate feedback."""
         if self.use_ultimate_detection.get():
-            self.log_text("🚀 Ultimate Detection Engine ENABLED")
-            self.log_text("   Enhancement features active:")
-            self.log_text("   • Advanced image preprocessing (CLAHE, bilateral filtering, unsharp masking)")
-            self.log_text("   • Multi-algorithm ensemble (ORB, BRISK, AKAZE, SIFT)")
-            self.log_text("   • Template-enhanced validation with smart filtering")
-            self.log_text("   • Intelligent voting with consensus boosting")
-            self.log_text("   Expected accuracy: 95-99% (vs 65-70% basic)")
+            self.log_text("🚀 Ultimate Detection Engine ENABLED - Using advanced analysis.")
+            if not self.cache_build_in_progress and self.ultimate_detector:
+                # Eagerly load the database in the background if not already done
+                threading.Thread(target=self._load_ultimate_database, daemon=True).start()
         else:
-            self.log_text("📉 Ultimate Detection Engine DISABLED")
-            self.log_text("   Using basic histogram matching + template validation")
-            self.log_text("   Expected accuracy: 65-70% (proven working system)")
+            self.log_text("📉 Ultimate Detection Engine DISABLED - Using basic histogram matching.")
     
     def toggle_arena_priority(self):
         """Toggle Arena Priority detection on/off."""
@@ -5932,6 +5574,139 @@ class CoordinateSelector:
             bd=3
         )
         apply_card_btn.pack(pady=10)
+    
+    def _create_hero_correction_tab(self, parent):
+        """Create the hero correction tab for manual hero choice overrides."""
+        # Header
+        header_frame = tk.Frame(parent, bg='#34495E')
+        header_frame.pack(fill='x', padx=10, pady=10)
+        
+        header_label = tk.Label(
+            header_frame,
+            text="👑 Manual Hero Selection Override",
+            font=('Arial', 14, 'bold'),
+            fg='#F39C12',
+            bg='#34495E'
+        )
+        header_label.pack()
+        
+        # Instructions
+        instructions_label = tk.Label(
+            header_frame,
+            text="Override AI hero recommendations when you disagree with the analysis",
+            font=('Arial', 10),
+            fg='#BDC3C7',
+            bg='#34495E'
+        )
+        instructions_label.pack()
+        
+        # Current hero status
+        status_frame = tk.Frame(parent, bg='#34495E', relief='sunken', bd=2)
+        status_frame.pack(fill='x', padx=10, pady=5)
+        
+        current_hero_text = f"Current Hero: {getattr(self, 'current_hero', None) or 'None Selected'}"
+        self.current_hero_label = tk.Label(
+            status_frame,
+            text=current_hero_text,
+            font=('Arial', 12, 'bold'),
+            fg='#E74C3C',
+            bg='#34495E'
+        )
+        self.current_hero_label.pack(pady=5)
+        
+        # Hero override section
+        override_frame = tk.Frame(parent, bg='#34495E')
+        override_frame.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        # Hero selection dropdown
+        hero_selection_frame = tk.Frame(override_frame, bg='#34495E')
+        hero_selection_frame.pack(fill='x', pady=10)
+        
+        tk.Label(
+            hero_selection_frame,
+            text="Select Hero to Override:",
+            font=('Arial', 11, 'bold'),
+            fg='#ECF0F1',
+            bg='#34495E'
+        ).pack(side='left')
+        
+        hero_classes = ['WARRIOR', 'PALADIN', 'HUNTER', 'ROGUE', 'PRIEST', 
+                       'SHAMAN', 'MAGE', 'WARLOCK', 'DRUID', 'DEMONHUNTER']
+        
+        self.hero_override_var = tk.StringVar(value="Select Hero...")
+        from tkinter import ttk
+        hero_dropdown = ttk.Combobox(
+            hero_selection_frame,
+            textvariable=self.hero_override_var,
+            values=hero_classes,
+            state='readonly',
+            width=15
+        )
+        hero_dropdown.pack(side='left', padx=10)
+        
+        # Override reason text area
+        reason_frame = tk.Frame(override_frame, bg='#34495E')
+        reason_frame.pack(fill='both', expand=True, pady=10)
+        
+        tk.Label(
+            reason_frame,
+            text="Reason for Override (optional):",
+            font=('Arial', 11, 'bold'),
+            fg='#ECF0F1',
+            bg='#34495E'
+        ).pack(anchor='w')
+        
+        self.hero_override_reason = scrolledtext.ScrolledText(
+            reason_frame,
+            height=8,
+            width=80,
+            font=('Arial', 10),
+            bg='#16213E',
+            fg='#ECF0F1',
+            insertbackground='#ECF0F1'
+        )
+        self.hero_override_reason.pack(fill='both', expand=True, pady=5)
+        self.hero_override_reason.insert('1.0', "Enter your reasoning for overriding the AI's hero recommendation...")
+        
+        # Apply hero override button
+        apply_hero_btn = tk.Button(
+            override_frame,
+            text="👑 Apply Hero Override",
+            command=self._apply_hero_override,
+            bg='#8E44AD',
+            fg='white',
+            font=('Arial', 11, 'bold'),
+            relief='raised',
+            bd=3
+        )
+        apply_hero_btn.pack(pady=10)
+    
+    def _apply_hero_override(self):
+        """Apply the hero override selection."""
+        try:
+            selected_hero = self.hero_override_var.get()
+            if selected_hero == "Select Hero...":
+                messagebox.showwarning("No Selection", "Please select a hero to override to.")
+                return
+            
+            reason = self.hero_override_reason.get('1.0', 'end-1c').strip()
+            if reason == "Enter your reasoning for overriding the AI's hero recommendation...":
+                reason = "Manual override (no reason provided)"
+            
+            # Update the current hero
+            self.current_hero = selected_hero
+            if hasattr(self, 'current_hero_label'):
+                self.current_hero_label.config(text=f"Current Hero: {selected_hero}")
+            
+            # Log the override
+            self.log_text(f"🔄 Hero override applied: {selected_hero}")
+            self.log_text(f"📝 Reason: {reason}")
+            
+            messagebox.showinfo("Override Applied", f"Hero override applied successfully!\nNew Hero: {selected_hero}")
+            
+        except Exception as e:
+            self.log_text(f"❌ Error applying hero override: {str(e)}")
+            messagebox.showerror("Error", f"Failed to apply hero override: {str(e)}")
     
     def _create_system_override_tab(self, parent):
         """Create the system override tab for granular AI control."""
