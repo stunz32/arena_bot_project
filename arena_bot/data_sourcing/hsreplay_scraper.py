@@ -70,7 +70,60 @@ class HSReplayScraper:
         self.last_hero_fetch = None
         self.api_call_count = 0
         
+        # Status tracking for graceful UI integration
+        self.card_data_status = 'unknown'  # 'online', 'cached', 'offline', 'error'
+        self.hero_data_status = 'unknown'
+        self.last_error_message = None
+        self.card_cache_age_hours = 0
+        self.hero_cache_age_hours = 0
+        
         self.logger.info("HSReplayScraper initialized with caching enabled")
+    
+    def get_status(self) -> Dict[str, Any]:
+        """
+        Get current HSReplay data source status for UI display.
+        
+        Returns:
+            Status dictionary with information for both card and hero data
+        """
+        # Calculate cache ages
+        self._update_cache_ages()
+        
+        # Determine overall status
+        if self.card_data_status == 'online' and self.hero_data_status == 'online':
+            overall_status = 'online'
+        elif self.card_data_status in ['cached', 'online'] and self.hero_data_status in ['cached', 'online']:
+            overall_status = 'cached'
+        elif self.card_data_status == 'error' or self.hero_data_status == 'error':
+            overall_status = 'error'
+        else:
+            overall_status = 'offline'
+        
+        return {
+            'status': overall_status,
+            'card_status': self.card_data_status,
+            'hero_status': self.hero_data_status,
+            'card_cache_age_hours': self.card_cache_age_hours,
+            'hero_cache_age_hours': self.hero_cache_age_hours,
+            'last_error': self.last_error_message,
+            'api_calls_today': self.api_call_count
+        }
+    
+    def _update_cache_ages(self):
+        """Update cache age information in hours."""
+        # Card cache age
+        if self.card_cache_file.exists():
+            card_age = time.time() - self.card_cache_file.stat().st_mtime
+            self.card_cache_age_hours = card_age / 3600
+        else:
+            self.card_cache_age_hours = 999  # No cache
+            
+        # Hero cache age  
+        if self.hero_cache_file.exists():
+            hero_age = time.time() - self.hero_cache_file.stat().st_mtime
+            self.hero_cache_age_hours = hero_age / 3600
+        else:
+            self.hero_cache_age_hours = 999  # No cache
     
     def get_underground_arena_stats(self, force_refresh: bool = False) -> Dict[str, Dict[str, Any]]:
         """
@@ -89,6 +142,7 @@ class HSReplayScraper:
             if not force_refresh:
                 cached_data = self._load_card_cache()
                 if cached_data:
+                    self.card_data_status = 'cached'
                     self.logger.info(f"Using cached card data ({len(cached_data)} cards)")
                     return cached_data
             
@@ -98,7 +152,13 @@ class HSReplayScraper:
             
             if not raw_data:
                 self.logger.warning("No card data received from API, using cached fallback")
-                return self._load_card_cache() or {}
+                cached_fallback = self._load_card_cache()
+                if cached_fallback:
+                    self.card_data_status = 'cached'
+                    return cached_fallback
+                else:
+                    self.card_data_status = 'offline'
+                    return {}
             
             # Translate dbf_ids to card_ids
             translated_data = self._translate_card_data(raw_data)
@@ -106,19 +166,29 @@ class HSReplayScraper:
             # Cache the translated data
             self._save_card_cache(translated_data)
             
+            # Success - API data retrieved
+            self.card_data_status = 'online'
+            self.last_error_message = None
+            
             fetch_time = time.time() - start_time
             self.logger.info(f"Card data fetched and cached: {len(translated_data)} cards in {fetch_time:.2f}s")
             
             return translated_data
             
         except Exception as e:
-            self.logger.error(f"Error fetching card stats: {e}")
+            error_msg = f"Error fetching card stats: {e}"
+            self.logger.error(error_msg)
+            self.last_error_message = str(e)
+            
             # Fallback to cache
             cached_fallback = self._load_card_cache()
             if cached_fallback:
+                self.card_data_status = 'cached'
                 self.logger.warning("Using stale cached data as fallback")
                 return cached_fallback
-            return {}
+            else:
+                self.card_data_status = 'error'
+                return {}
     
     def get_hero_winrates(self, force_refresh: bool = False) -> Dict[str, float]:
         """
@@ -137,6 +207,7 @@ class HSReplayScraper:
             if not force_refresh:
                 cached_data = self._load_hero_cache()
                 if cached_data:
+                    self.hero_data_status = 'cached'
                     self.logger.info(f"Using cached hero data ({len(cached_data)} classes)")
                     return cached_data
             
@@ -146,7 +217,13 @@ class HSReplayScraper:
             
             if not raw_data:
                 self.logger.warning("No hero data received from API, using cached fallback")
-                return self._load_hero_cache() or {}
+                cached_fallback = self._load_hero_cache()
+                if cached_fallback:
+                    self.hero_data_status = 'cached'
+                    return cached_fallback
+                else:
+                    self.hero_data_status = 'offline'
+                    return {}
             
             # Extract winrates by class
             hero_winrates = self._extract_hero_winrates(raw_data)
@@ -154,19 +231,29 @@ class HSReplayScraper:
             # Cache the data
             self._save_hero_cache(hero_winrates)
             
+            # Success - API data retrieved
+            self.hero_data_status = 'online'
+            self.last_error_message = None
+            
             fetch_time = time.time() - start_time
             self.logger.info(f"Hero data fetched and cached: {len(hero_winrates)} classes in {fetch_time:.2f}s")
             
             return hero_winrates
             
         except Exception as e:
-            self.logger.error(f"Error fetching hero stats: {e}")
+            error_msg = f"Error fetching hero stats: {e}"
+            self.logger.error(error_msg)
+            self.last_error_message = str(e)
+            
             # Fallback to cache
             cached_fallback = self._load_hero_cache()
             if cached_fallback:
+                self.hero_data_status = 'cached'
                 self.logger.warning("Using stale cached hero data as fallback")
                 return cached_fallback
-            return {}
+            else:
+                self.hero_data_status = 'error'
+                return {}
     
     def _fetch_card_stats_from_api(self) -> Optional[List[Dict]]:
         """Fetch raw card statistics from HSReplay API."""

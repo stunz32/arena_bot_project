@@ -1,32 +1,75 @@
-import sys
-from loguru import logger
-from pathlib import Path
+"""
+Simple logging configuration for Arena Bot.
 
-def setup_logging():
+Following CLAUDE.md principles - minimal, focused, and easy to understand.
+"""
+
+import logging
+import logging.handlers
+from pathlib import Path
+from datetime import datetime
+
+
+def setup_logging(log_level=logging.INFO):
     """
-    Set up Loguru for detailed and beautiful logging.
+    Set up logging for the Arena Bot application.
+    
+    Args:
+        log_level: Logging level (default: INFO)
     """
-    logger.remove() # Remove default handler
-    
-    # Console logger with colors and better formatting - force UTF-8 for Windows
-    logger.add(
-        sys.stderr,
-        level="INFO",
-        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
-        colorize=True,
-        encoding="utf-8"
-    )
-    
-    # Create logs directory
+    # Create logs directory if it doesn't exist
     log_dir = Path(__file__).parent.parent.parent / "logs"
     log_dir.mkdir(exist_ok=True)
     
-    # File logger for history
-    log_file = log_dir / "arena_bot_{time:YYYY-MM-DD}.log"
-    logger.add(str(log_file), level="DEBUG", rotation="10 MB", retention="7 days", encoding="utf-8")
+    # Create log filename with timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = log_dir / f"arena_bot_{timestamp}.log"
     
-    logger.info("Logging configured with Loguru.")
+    # Configure logging format
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    
+    # Console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(log_level)
+    console_handler.setFormatter(formatter)
+    
+    # --- THIS IS THE CRITICAL FIX ---
+    # File handler (with rotation) and UTF-8 encoding
+    file_handler = logging.handlers.RotatingFileHandler(
+        log_file, maxBytes=10*1024*1024, backupCount=5, encoding='utf-8'
+    )
+    # --- END OF CRITICAL FIX ---
+    
+    file_handler.setLevel(log_level)
+    file_handler.setFormatter(formatter)
+    
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(log_level)
+    
+    # Clear any existing handlers
+    root_logger.handlers.clear()
+    
+    # Add our handlers
+    root_logger.addHandler(console_handler)
+    root_logger.addHandler(file_handler)
+    
+    # Log the setup
+    logger = logging.getLogger(__name__)
+    logger.info(f"Logging configured - Level: {logging.getLevelName(log_level)}")
+    logger.info(f"Log file: {log_file}")
+
 
 def get_logger(name):
-    """No-op, Loguru handles this automatically."""
-    return logger
+    """
+    Get a logger instance for a specific module.
+    
+    Args:
+        name: Logger name (typically __name__)
+        
+    Returns:
+        Logger instance
+    """
+    return logging.getLogger(name)

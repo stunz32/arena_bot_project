@@ -9,9 +9,22 @@ from tkinter import ttk
 import threading
 import time
 import logging
+import sys
 from typing import Dict, Optional, Tuple
 from dataclasses import dataclass
 import cv2
+
+# Windows-specific imports for overlay transparency
+if sys.platform == 'win32':
+    try:
+        import win32gui
+        import win32con
+        WIN32_AVAILABLE = True
+    except ImportError:
+        WIN32_AVAILABLE = False
+        print("⚠️ pywin32 not available - overlay transparency may not work on Windows")
+else:
+    WIN32_AVAILABLE = False
 
 # Enhanced tooltip class for comprehensive statistical information
 class StatisticalTooltip:
@@ -437,6 +450,36 @@ class DraftOverlay:
         # Set window transparency
         root.attributes('-alpha', self.config.opacity)
         
+        # Windows-specific transparency and click-through functionality
+        if WIN32_AVAILABLE:
+            try:
+                # Get window handle after the window is created
+                root.update_idletasks()  # Ensure window is fully created
+                hwnd = root.winfo_id()
+                
+                # Set window as layered and transparent to mouse clicks
+                extended_style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
+                win32gui.SetWindowLong(
+                    hwnd, 
+                    win32con.GWL_EXSTYLE, 
+                    extended_style | win32con.WS_EX_LAYERED | win32con.WS_EX_TRANSPARENT
+                )
+                
+                # Set transparency - make background transparent but keep content visible
+                win32gui.SetLayeredWindowAttributes(
+                    hwnd, 
+                    0,  # Color key (0 = black will be transparent)
+                    255,  # Alpha value (255 = fully opaque for non-transparent areas)
+                    win32con.LWA_COLORKEY | win32con.LWA_ALPHA
+                )
+                
+                self.logger.info("✅ Windows transparency enabled - overlay should be click-through")
+                
+            except Exception as e:
+                self.logger.warning(f"⚠️ Failed to set Windows transparency: {e}")
+        else:
+            self.logger.info("ℹ️ Using standard Tkinter transparency (not Windows)")
+        
         # Dynamic window sizing based on phase
         self.update_window_size_for_phase("waiting")
         
@@ -561,16 +604,7 @@ class DraftOverlay:
         control_frame = tk.Frame(self.root, bg=self.config.background_color)
         control_frame.pack(fill="x", padx=10, pady=5)
         
-        # Manual update button
-        update_btn = tk.Button(
-            control_frame,
-            text="🔄 Update",
-            command=self.manual_update,
-            bg="#3498db",
-            fg="white",
-            font=("Arial", 9)
-        )
-        update_btn.pack(side="left", padx=5)
+        # Update button removed - overlay is display-only component
         
         # Settings button
         settings_btn = tk.Button(
@@ -1480,30 +1514,7 @@ class DraftOverlay:
                 fg=self.config.highlight_color
             )
     
-    def manual_update(self):
-        """Manually trigger an update."""
-        self.logger.info("Manual update triggered")
-        self.status_label.config(text="🔄 Updating...")
-        
-        # Import here to avoid circular imports
-        from ..complete_arena_bot import CompleteArenaBot
-        
-        try:
-            bot = CompleteArenaBot()
-            analysis = bot.analyze_draft("screenshot.png", "warrior")
-            
-            if analysis['success']:
-                self.current_analysis = analysis
-                self.update_recommendation_display(analysis)
-                self.status_label.config(
-                    text=f"✅ Updated - {len(analysis['detected_cards'])} cards detected"
-                )
-            else:
-                self.status_label.config(text="❌ No draft found")
-                
-        except Exception as e:
-            self.logger.error(f"Update error: {e}")
-            self.status_label.config(text="❌ Update failed")
+    # Manual update method removed - overlay is now display-only component
     
     def show_settings(self):
         """Show settings dialog."""
@@ -1571,21 +1582,7 @@ class DraftOverlay:
         )
         apply_btn.pack(pady=10)
     
-    def auto_update_loop(self):
-        """Automatic update loop running in separate thread."""
-        while self.running:
-            try:
-                # Sleep first to avoid immediate update on start
-                time.sleep(self.config.update_interval)
-                
-                if not self.running:
-                    break
-                
-                # Update in main thread
-                self.root.after(0, self.manual_update)
-                
-            except Exception as e:
-                self.logger.error(f"Auto-update error: {e}")
+    # Auto update loop method removed - overlay is now display-only component
     
     def start(self):
         """Start the overlay interface."""
@@ -1598,20 +1595,32 @@ class DraftOverlay:
         # Start running
         self.running = True
         
-        # Start auto-update thread
-        self.update_thread = threading.Thread(target=self.auto_update_loop, daemon=True)
-        self.update_thread.start()
-        
         # Start performance monitoring
         self.schedule_periodic_optimization_check()
-        
-        # Do initial update
-        self.manual_update()
-        
-        # Start the GUI main loop
+
+        # Start the GUI main loop (non-blocking for thread compatibility)
         try:
-            self.root.mainloop()
+            # Force window to appear on top and be visible
+            self.root.lift()
+            self.root.focus_force()
+            
+            # Use a periodic update instead of mainloop for thread compatibility
+            def update_overlay():
+                if self.running and self.root:
+                    try:
+                        self.root.update_idletasks()
+                        self.root.update()
+                        self.root.after(50, update_overlay)  # 20 FPS update rate
+                    except tk.TclError:
+                        # Window was destroyed
+                        self.running = False
+            
+            self.root.after(10, update_overlay)  # Start the update loop
+            self.root.mainloop()  # Keep for final cleanup
         except KeyboardInterrupt:
+            self.stop()
+        except tk.TclError:
+            # Window was destroyed
             self.stop()
     
     def stop(self):

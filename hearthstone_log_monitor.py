@@ -74,6 +74,7 @@ class HearthstoneLogMonitor:
         self.on_draft_start = None
         self.on_draft_complete = None
         self.on_hero_choices_ready = None  # NEW: Hero selection callback
+        self.on_card_choices_ready = None  # NEW: Card choices ready callback
         
         # Enhanced Arena Tracker-style regex patterns with hero detection
         self.patterns = {
@@ -359,6 +360,15 @@ class HearthstoneLogMonitor:
                 # Enhanced with hero context
                 if self.draft_phase != "hero_selection":
                     self.draft_phase = "card_picks"
+                    
+                # NEW: Trigger automatic screenshot analysis when card choices appear
+                print(f"🤖 Card choices detected - triggering automatic analysis")
+                if self.on_card_choices_ready:
+                    self.on_card_choices_ready({
+                        'event': 'CARD_CHOICES_READY',
+                        'draft_phase': self.draft_phase,
+                        'timestamp': entry.timestamp if 'entry' in locals() else None
+                    })
             
             # Current deck contents (for mid-draft analysis)
             deck_card_match = self.patterns['draft_deck_card'].search(message)

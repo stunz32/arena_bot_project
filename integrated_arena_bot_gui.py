@@ -39,8 +39,8 @@ from visual_debugger import VisualDebugger, create_debug_visualization, save_deb
 from metrics_logger import MetricsLogger, log_detection_metrics, generate_performance_report
 from validation_suite import ValidationSuite, run_full_validation, check_system_health
 
-# Import Loguru for enhanced logging
-from arena_bot.utils.logging_config import setup_logging, logger
+# Import standard logging
+from arena_bot.utils.logging_config import setup_logging, get_logger
 
 # Import CardRefiner for perfect coordinate refinement
 from arena_bot.core.card_refiner import CardRefiner
@@ -263,9 +263,10 @@ class IntegratedArenaBotGUI:
         print("🚀 INTEGRATED ARENA BOT - GUI VERSION")
         print("=" * 80)
         
-        # Initialize enhanced logging with Loguru
+        # Initialize standard logging
         setup_logging()
-        logger.info("🚀 Integrated Arena Bot starting up...")
+        self.logger = get_logger(__name__)
+        self.logger.info("🚀 Integrated Arena Bot starting up...")
         
         # Step 1: Initialize ALL state variables and components FIRST
         self.running = False
@@ -300,9 +301,9 @@ class IntegratedArenaBotGUI:
         try:
             from arena_bot.data.arena_card_database import ArenaCardDatabase
             self.arena_database = ArenaCardDatabase()
-            logger.info("✅ Arena database loaded for intelligent card search")
+            self.logger.info("✅ Arena database loaded for intelligent card search")
         except Exception as e:
-            logger.warning(f"⚠️ Arena database not available: {e}")
+            self.logger.warning(f"⚠️ Arena database not available: {e}")
             self.arena_database = None
 
         # Step 3: NOW that all attributes exist, build the GUI
@@ -310,13 +311,13 @@ class IntegratedArenaBotGUI:
             try:
                 self.root = tk.Tk()
                 self.setup_gui() # This will now succeed
-                logger.info("✅ GUI setup completed successfully")
+                self.logger.info("✅ GUI setup completed successfully")
             except Exception as e:
-                logger.error(f"❌ GUI setup failed: {e}")
+                self.logger.error(f"❌ GUI setup failed: {e}")
                 self.root = None
         else:
             self.root = None
-            logger.warning("⚠️ GUI not available, running in headless mode")
+            self.logger.warning("⚠️ GUI not available, running in headless mode")
 
         # Step 4: Start background processes AFTER GUI is built
         if self.root:
@@ -324,7 +325,7 @@ class IntegratedArenaBotGUI:
         
         self._start_background_cache_builder()
         
-        logger.success("🎯 Integrated Arena Bot GUI ready!")
+        self.logger.info("🎯 Integrated Arena Bot GUI ready!")
         print("🎯 Integrated Arena Bot GUI ready!")
     
     def _run_detection_with_timeout(self, detection_func, timeout_seconds: float, method_name: str):
@@ -1399,12 +1400,18 @@ class IntegratedArenaBotGUI:
                 # Schedule the AI analysis to be called from the main thread
                 self.ui_queue.put((self._handle_enhanced_hero_selection, (hero_classes, hero_data), {}))
 
+        def on_card_choices_ready(choice_data):
+            self.ui_queue.put((self.log_text, (f"\n🤖 CARD CHOICES READY - Triggering automatic analysis...",), {}))
+            # Trigger automatic screenshot analysis when new card choices appear
+            self.ui_queue.put((self.manual_screenshot, (), {}))
+        
         # Set up all callbacks
         self.log_monitor.on_draft_start = on_draft_start
         self.log_monitor.on_draft_complete = on_draft_complete
         self.log_monitor.on_game_state_change = on_game_state_change
         self.log_monitor.on_draft_pick = on_draft_pick
         self.log_monitor.on_hero_choices_ready = on_hero_choices_ready
+        self.log_monitor.on_card_choices_ready = on_card_choices_ready
     
     def setup_gui(self):
         """Setup the GUI interface."""
@@ -1512,7 +1519,7 @@ class IntegratedArenaBotGUI:
         self.screenshot_btn.pack(side='left', padx=5)
         
         # Detection method selector
-        self.detection_method = tk.StringVar(value="simple_working")
+        self.detection_method = tk.StringVar(value="hybrid_cascade")
         detection_methods = [
             ("✅ Simple Working", "simple_working"),
             ("🔄 Hybrid Cascade", "hybrid_cascade"),
@@ -1527,13 +1534,25 @@ class IntegratedArenaBotGUI:
         method_menu['menu'].config(bg='#8E44AD', fg='white')
         method_menu.pack(side='left', padx=5)
         
+        # Detection method status label - makes current selection obvious
+        self.detection_status_label = tk.Label(
+            control_frame,
+            text="🔄 HYBRID CASCADE",
+            bg='#27AE60',  # Green background to show it's active
+            fg='white',
+            font=('Arial', 8, 'bold'),
+            relief='raised',
+            bd=2
+        )
+        self.detection_status_label.pack(side='left', padx=2)
+        
         # Debug controls
-        self.debug_enabled = tk.BooleanVar(value=is_debug_enabled())
+        self.debug_enabled = tk.BooleanVar(value=True)
+        self.debug_enabled.trace_add("write", self.toggle_debug_mode)
         debug_check = tk.Checkbutton(
             control_frame,
             text="🐛 DEBUG",
             variable=self.debug_enabled,
-            command=self.toggle_debug_mode,
             bg='#2C3E50',
             fg='#ECF0F1',
             selectcolor='#E74C3C',
@@ -1622,20 +1641,23 @@ class IntegratedArenaBotGUI:
         self.coord_mode_btn.pack(side='left', padx=5)
         
         # Ultimate Detection toggle (NEW!)
-        self.use_ultimate_detection = tk.BooleanVar(value=False)
+        self.use_ultimate_detection = tk.BooleanVar(value=True)
+        self.use_ultimate_detection.trace_add("write", self.toggle_ultimate_detection)
         self.ultimate_detection_btn = tk.Checkbutton(
             control_frame,
             text="🚀 Ultimate Detection",
             variable=self.use_ultimate_detection,
-            command=self.toggle_ultimate_detection,
             bg='#2C3E50',
             fg='#E74C3C',  # Red color to indicate advanced feature
             selectcolor='#34495E',
             font=('Arial', 8, 'bold'),
             relief='flat'
         )
-        # Only show if Ultimate Detection Engine is available
+        # Always show Ultimate Detection checkbox - disable if not available
         if self.ultimate_detector:
+            self.ultimate_detection_btn.pack(side='left', padx=5)
+        else:
+            self.ultimate_detection_btn.config(state='disabled')
             self.ultimate_detection_btn.pack(side='left', padx=5)
         
         # Arena Priority toggle for enhanced arena draft detection
@@ -1658,20 +1680,23 @@ class IntegratedArenaBotGUI:
             self.arena_priority_btn.pack(side='left', padx=5)
         
         # pHash Detection toggle for ultra-fast detection
-        self.use_phash_detection = tk.BooleanVar(value=False)  # Default disabled for safety
+        self.use_phash_detection = tk.BooleanVar(value=True)  # Default enabled for speed
+        self.use_phash_detection.trace_add("write", self.toggle_phash_detection)
         self.phash_detection_btn = tk.Checkbutton(
             control_frame,
             text="⚡ pHash Detection",
             variable=self.use_phash_detection,
-            command=self.toggle_phash_detection,
             bg='#2C3E50',
             fg='#E67E22',  # Electric orange color to indicate speed
             selectcolor='#34495E',
             font=('Arial', 8, 'bold'),
             relief='flat'
         )
-        # Only show if pHash matcher is available
+        # Always show pHash Detection checkbox - disable if not available  
         if self.phash_matcher:
+            self.phash_detection_btn.pack(side='left', padx=5)
+        else:
+            self.phash_detection_btn.config(state='disabled')
             self.phash_detection_btn.pack(side='left', padx=5)
         
         # Enable custom mode if coordinates were loaded during startup
@@ -2189,7 +2214,7 @@ class IntegratedArenaBotGUI:
         self.heartharena_label.config(text="💥 HearthArena (Error)", fg=error_config[1])
         self.fallback_mode_label.config(text="💥 System Error", fg=error_config[1])
     
-    def toggle_debug_mode(self):
+    def toggle_debug_mode(self, *args):
         """Toggle debug mode on/off with immediate and accurate feedback."""
         # The .get() method retrieves the CURRENT state of the checkbox
         if self.debug_enabled.get():
@@ -2304,7 +2329,7 @@ class IntegratedArenaBotGUI:
                 
             except Exception as e:
                 self.log_text(f"❌ Validation suite failed: {e}")
-                logger.error(f"Validation suite error: {e}")
+                self.logger.error(f"Validation suite error: {e}")
             finally:
                 # Re-enable the button
                 self.validation_btn.configure(state='normal', text="🧪 VALIDATE")
@@ -4846,7 +4871,7 @@ class IntegratedArenaBotGUI:
         except Exception as e:
             messagebox.showerror("System Health Error", f"Failed to get system health: {e}")
     
-    def toggle_ultimate_detection(self):
+    def toggle_ultimate_detection(self, *args):
         """Toggle Ultimate Detection Engine on/off with immediate feedback."""
         if not self.ultimate_detector:
             self.log_text("⚠️ Ultimate Detection Engine not available.")
@@ -4878,7 +4903,7 @@ class IntegratedArenaBotGUI:
             self.log_text("📉 Arena Priority DISABLED")
             self.log_text("   Using standard card detection without arena prioritization")
     
-    def toggle_phash_detection(self):
+    def toggle_phash_detection(self, *args):
         """Toggle pHash Detection on/off with immediate feedback."""
         if not self.phash_matcher:
             self.log_text("⚠️ pHash Detection not available. Install 'imagehash'.")

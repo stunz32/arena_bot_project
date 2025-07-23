@@ -107,15 +107,11 @@ find /mnt -name "integrated_arena_bot*" -type f 2>/dev/null
 
 
 ### **BEFORE MAKING ANY CHANGES:**
-1. **READ CLAUDE_ARENA_BOT_CHECKPOINT.md COMPLETELY** - This contains all project context and history
 2. **NEVER simplify existing production modules** - They exist for good reasons
 3. **NEVER create "basic" implementations** - Advanced versions already exist
 4. **ALWAYS use existing production modules** - Don't reinvent the wheel
-5. **CHECK the checkpoint for current status** - Understand what's already implemented
 
 ### **IF BOT "ISN'T WORKING":**
-1. **Check if user is using correct launcher** (see Production Launchers section in checkpoint)
-2. **Verify environment** (Windows native vs WSL vs GUI requirements)
 3. **Check existing implementations** before creating new ones
 4. **Read debug output carefully** - it shows what's actually happening
 
