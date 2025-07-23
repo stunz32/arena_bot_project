@@ -35,7 +35,7 @@ class GrandmasterAdvisor:
         
         # Initialize core components with full integration
         self.card_evaluator = CardEvaluationEngine()
-        self.deck_analyzer = StrategicDeckAnalyzer()
+        self.deck_analyzer = StrategicDeckAnalyzer(card_evaluator=self.card_evaluator)
         self.hsreplay_scraper = get_hsreplay_scraper()
         
         # Hero context and archetype management
@@ -126,6 +126,10 @@ class GrandmasterAdvisor:
         confidence_level = self._calculate_overall_confidence(card_evaluations, deck_state)
         self.confidence_scores.append(confidence_level)
         
+        # Calculate greed meter for recommended card
+        recommended_evaluation = card_evaluations[recommended_index]
+        greed_meter = self._calculate_greed_meter(recommended_evaluation)
+        
         analysis_time = (datetime.now() - start_time).total_seconds() * 1000
         self.last_analysis_time = analysis_time
         
@@ -136,6 +140,7 @@ class GrandmasterAdvisor:
             deck_analysis=deck_analysis,
             card_coordinates=[],  # Will be provided by GUI
             confidence_level=confidence_level,
+            greed_meter=greed_meter,
             analysis_time_ms=analysis_time
         )
         
@@ -194,17 +199,6 @@ class GrandmasterAdvisor:
          Strong tempo option for Mage. Fills curve gap at 4 mana."
         """
         return f"Placeholder explanation for {recommended_card} - Phase 1 will add statistical backing"
-    
-    def _detect_pivot_opportunities(self, deck_state: DeckState, 
-                                  offered_analyses: List[Dict]) -> Optional[str]:
-        """
-        Detect opportunities to pivot to a different archetype.
-        
-        Tests each offered card against other archetype weights to see
-        if a significant improvement (>30%) would result from pivoting.
-        """
-        # Placeholder - Phase 1 will implement pivot detection
-        return None
     
     def _calculate_greed_meter(self, dimensional_scores: DimensionalScores) -> float:
         """

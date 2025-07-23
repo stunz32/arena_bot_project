@@ -15,7 +15,7 @@ import json
 import copy
 from pathlib import Path
 from datetime import datetime
-from typing import List
+from typing import Dict, List, Any, Optional, Tuple, Callable
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
 from PIL import Image, ImageTk
@@ -47,6 +47,21 @@ from arena_bot.core.card_refiner import CardRefiner
 
 # Import DraftOverlay for visual overlay
 from arena_bot.ui.draft_overlay import DraftOverlay
+
+# Import AI v2 Settings System
+from arena_bot.ai_v2.settings_manager import get_settings_manager
+from arena_bot.ai_v2.settings_dialog import SettingsDialog
+from arena_bot.ai_v2.settings_integration import SettingsIntegrator
+
+# Import AI v2 Conversational Coach
+from arena_bot.ai_v2.conversational_coach import ConversationalCoach
+
+# Import AI v2 Draft Export/Tracking System
+from arena_bot.ai_v2.draft_exporter import get_draft_exporter
+from arena_bot.ai_v2.draft_tracking_integration import DraftTrackingIntegrator
+
+# Import AI v2 System Health Monitor
+from arena_bot.ai_v2.system_health_monitor import get_health_monitor
 
 class ManualCorrectionDialog(tk.Toplevel):
     """
@@ -280,6 +295,7 @@ class IntegratedArenaBotGUI:
         self.analysis_in_progress = False
         self.cache_build_in_progress = False
         self.last_analysis_candidates = [[], [], []]
+        self._gui_start_time = time.time()  # For health monitoring
         self.last_detection_result = None
         self.result_queue = Queue()
         self.ui_queue = Queue()
@@ -288,6 +304,7 @@ class IntegratedArenaBotGUI:
         self.init_log_monitoring()
         self.init_ai_advisor()
         self.init_card_detection()
+        self.init_settings_system()
         
         self.debug_config = get_debug_config()
         self.visual_debugger = VisualDebugger()
@@ -1157,6 +1174,66 @@ class IntegratedArenaBotGUI:
             self.hero_selector = None
             self.grandmaster_advisor = None
     
+    def init_settings_system(self):
+        """Initialize the AI v2 settings system and conversational coach."""
+        try:
+            # Initialize settings manager and integrator
+            self.settings_manager = get_settings_manager()
+            self.settings_integrator = SettingsIntegrator()
+            
+            # Initialize conversational coach
+            self.conversational_coach = ConversationalCoach()
+            
+            # Initialize draft export/tracking system
+            self.draft_exporter = get_draft_exporter()
+            self.draft_tracking_integrator = DraftTrackingIntegrator()
+            
+            # Initialize system health monitor
+            self.health_monitor = get_health_monitor()
+            
+            # Register main GUI component for health monitoring
+            self.health_monitor.register_component(
+                'arena_bot_gui',
+                health_checker=self._check_gui_health,
+                warning_thresholds={'memory_usage_mb': 500, 'response_time_ms': 1000},
+                critical_thresholds={'memory_usage_mb': 1000, 'response_time_ms': 5000}
+            )
+            
+            # Register AI v2 components with settings integrator
+            if hasattr(self, 'grandmaster_advisor') and self.grandmaster_advisor:
+                self.settings_integrator.register_component('grandmaster_advisor', self.grandmaster_advisor)
+                
+                # Inject advisor reference into the coach for contextual advice
+                self.conversational_coach.grandmaster_advisor = self.grandmaster_advisor
+                
+            if hasattr(self, 'hero_selector') and self.hero_selector:
+                self.settings_integrator.register_component('hero_selector', self.hero_selector)
+                
+                # Inject hero selector reference into the coach
+                self.conversational_coach.hero_selector = self.hero_selector
+            
+            if self.conversational_coach:
+                self.settings_integrator.register_component('conversational_coach', self.conversational_coach)
+            
+            print("✅ Settings system, conversational coach, draft export system, and health monitor initialized")
+            self.settings_available = True
+            self.coach_available = True
+            self.export_available = True
+            self.health_available = True
+            
+        except Exception as e:
+            print(f"⚠️ Settings system not available: {e}")
+            self.settings_available = False
+            self.coach_available = False
+            self.export_available = False
+            self.health_available = False
+            self.settings_manager = None
+            self.settings_integrator = None
+            self.conversational_coach = None
+            self.draft_exporter = None
+            self.draft_tracking_integrator = None
+            self.health_monitor = None
+    
     def init_card_detection(self):
         """Initialize card detection system with Ultimate Detection Engine option."""
         try:
@@ -1422,6 +1499,9 @@ class IntegratedArenaBotGUI:
         
         # Make window stay on top
         self.root.attributes('-topmost', True)
+        
+        # Create menu bar
+        self.create_menu_bar()
         
         # Main title
         title_frame = tk.Frame(self.root, bg='#34495E', relief='raised', bd=2)
@@ -1811,6 +1891,9 @@ class IntegratedArenaBotGUI:
         )
         self.recommendation_text.pack(fill='x', padx=5, pady=5)
         
+        # AI Coach Chat Interface
+        self.setup_ai_coach_interface()
+        
         # Initial log message
         self.log_text("🎯 Integrated Arena Bot GUI Initialized!")
         self.log_text("✅ Log monitoring system ready")
@@ -1827,6 +1910,1233 @@ class IntegratedArenaBotGUI:
         
         # Setup draft review panel
         self.setup_draft_review_panel()
+    
+    def create_menu_bar(self):
+        """Create the menu bar with Settings option."""
+        try:
+            # Create menu bar
+            self.menubar = tk.Menu(self.root)
+            self.root.config(menu=self.menubar)
+            
+            # Settings menu
+            settings_menu = tk.Menu(self.menubar, tearoff=0)
+            self.menubar.add_cascade(label="Settings", menu=settings_menu)
+            
+            # Settings dialog option
+            if hasattr(self, 'settings_available') and self.settings_available:
+                settings_menu.add_command(
+                    label="⚙️ AI v2 Settings...",
+                    command=self.open_settings_dialog
+                )
+            else:
+                settings_menu.add_command(
+                    label="⚙️ AI v2 Settings... (Unavailable)",
+                    command=lambda: messagebox.showwarning(
+                        "Settings Unavailable", 
+                        "Settings system not available. Please check that AI v2 components are loaded."
+                    ),
+                    state='disabled'
+                )
+            
+            # Export settings
+            settings_menu.add_separator()
+            settings_menu.add_command(
+                label="📤 Export Settings...",
+                command=self.export_settings
+            )
+            settings_menu.add_command(
+                label="📥 Import Settings...",
+                command=self.import_settings
+            )
+            
+            # Reset settings
+            settings_menu.add_separator()
+            settings_menu.add_command(
+                label="🔄 Reset to Defaults",
+                command=self.reset_settings
+            )
+            
+            # Draft menu
+            if hasattr(self, 'export_available') and self.export_available:
+                draft_menu = tk.Menu(self.menubar, tearoff=0)
+                self.menubar.add_cascade(label="Draft", menu=draft_menu)
+                
+                # Draft tracking options
+                draft_menu.add_command(
+                    label="▶️ Start Draft Tracking",
+                    command=self.start_draft_tracking
+                )
+                draft_menu.add_command(
+                    label="⏹️ Stop Draft Tracking",
+                    command=self.stop_draft_tracking
+                )
+                draft_menu.add_command(
+                    label="📊 Draft Status",
+                    command=self.show_draft_status
+                )
+                
+                draft_menu.add_separator()
+                
+                # Export options
+                draft_menu.add_command(
+                    label="💾 Export Current Draft...",
+                    command=self.export_current_draft
+                )
+                draft_menu.add_command(
+                    label="📋 View Export Dialog...",
+                    command=self.show_export_dialog
+                )
+                
+                draft_menu.add_separator()
+                
+                # Configuration options
+                draft_menu.add_command(
+                    label="⚙️ Configure Auto-Tracking...",
+                    command=self.configure_draft_tracking
+                )
+            
+            # System Health menu (add after Draft menu)
+            if hasattr(self, 'health_available') and self.health_available:
+                health_menu = tk.Menu(self.menubar, tearoff=0)
+                self.menubar.add_cascade(label="System Health", menu=health_menu)
+                
+                # Health monitoring options
+                health_menu.add_command(
+                    label="🏥 System Health Status",
+                    command=self.show_system_health
+                )
+                health_menu.add_command(
+                    label="📊 Export Health Report",
+                    command=self.export_health_report
+                )
+                
+                health_menu.add_separator()
+                
+                # Health monitoring tools
+                health_menu.add_command(
+                    label="🔄 Run Health Check",
+                    command=self.run_manual_health_check
+                )
+                health_menu.add_command(
+                    label="⚙️ Configure Monitoring",
+                    command=self.configure_health_monitoring
+                )
+            
+        except Exception as e:
+            print(f"⚠️ Failed to create menu bar: {e}")
+    
+    def open_settings_dialog(self):
+        """Open the settings configuration dialog."""
+        try:
+            if not hasattr(self, 'settings_available') or not self.settings_available:
+                messagebox.showerror(
+                    "Settings Unavailable",
+                    "Settings system is not available. Please check the console for errors."
+                )
+                return
+            
+            # Create and show settings dialog
+            dialog = SettingsDialog(self.root, on_settings_changed=self.on_settings_changed)
+            
+        except Exception as e:
+            self.logger.error(f"Failed to open settings dialog: {e}")
+            messagebox.showerror("Error", f"Failed to open settings dialog: {e}")
+    
+    def on_settings_changed(self):
+        """Called when settings are changed to apply them to AI components."""
+        try:
+            if hasattr(self, 'settings_integrator') and self.settings_integrator:
+                # The SettingsIntegrator will automatically apply settings to registered components
+                self.log_text("✅ Settings updated and applied to AI v2 components")
+            else:
+                self.log_text("⚠️ Settings updated but integrator not available")
+                
+        except Exception as e:
+            self.logger.error(f"Error applying settings changes: {e}")
+            self.log_text(f"❌ Error applying settings: {e}")
+    
+    def export_settings(self):
+        """Export current settings to a file."""
+        try:
+            if not hasattr(self, 'settings_manager') or not self.settings_manager:
+                messagebox.showerror("Error", "Settings system not available")
+                return
+            
+            from tkinter import filedialog
+            filename = filedialog.asksaveasfilename(
+                defaultextension=".json",
+                filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+                title="Export Settings"
+            )
+            
+            if filename:
+                if self.settings_manager.export_settings(filename):
+                    messagebox.showinfo("Success", f"Settings exported to {filename}")
+                else:
+                    messagebox.showerror("Error", "Failed to export settings")
+                    
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to export settings: {e}")
+    
+    def import_settings(self):
+        """Import settings from a file."""
+        try:
+            if not hasattr(self, 'settings_manager') or not self.settings_manager:
+                messagebox.showerror("Error", "Settings system not available")
+                return
+            
+            from tkinter import filedialog
+            filename = filedialog.askopenfilename(
+                filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+                title="Import Settings"
+            )
+            
+            if filename:
+                if self.settings_manager.import_settings(filename):
+                    messagebox.showinfo("Success", "Settings imported successfully")
+                    self.on_settings_changed()  # Apply the imported settings
+                else:
+                    messagebox.showerror("Error", "Failed to import settings")
+                    
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to import settings: {e}")
+    
+    def reset_settings(self):
+        """Reset all settings to defaults."""
+        try:
+            if not hasattr(self, 'settings_manager') or not self.settings_manager:
+                messagebox.showerror("Error", "Settings system not available")
+                return
+            
+            result = messagebox.askyesno(
+                "Reset Settings",
+                "Are you sure you want to reset all settings to defaults? This cannot be undone."
+            )
+            
+            if result:
+                self.settings_manager.reset_to_defaults()
+                if self.settings_manager.save_settings():
+                    messagebox.showinfo("Success", "Settings reset to defaults")
+                    self.on_settings_changed()  # Apply the reset settings
+                else:
+                    messagebox.showerror("Error", "Failed to save reset settings")
+                    
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to reset settings: {e}")
+    
+    # =========================================================================
+    # Draft Export/Tracking Methods
+    # =========================================================================
+    
+    def start_draft_tracking(self):
+        """Start tracking a new draft session."""
+        try:
+            if not hasattr(self, 'export_available') or not self.export_available:
+                messagebox.showerror(
+                    "Draft Export Unavailable",
+                    "Draft tracking system is not available. Please check the console for errors."
+                )
+                return
+            
+            if not hasattr(self, 'draft_tracking_integrator') or not self.draft_tracking_integrator:
+                messagebox.showerror("Error", "Draft tracking system not initialized")
+                return
+            
+            # Start tracking
+            draft_id = self.draft_tracking_integrator.start_draft_tracking()
+            
+            messagebox.showinfo(
+                "Draft Tracking Started",
+                f"Draft tracking has been started.\nDraft ID: {draft_id}\n\nThe system will automatically track your hero selection and card picks."
+            )
+            
+            self.log_text(f"✅ Started draft tracking: {draft_id}")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to start draft tracking: {e}")
+            messagebox.showerror("Error", f"Failed to start draft tracking: {e}")
+    
+    def stop_draft_tracking(self):
+        """Stop the current draft tracking session."""
+        try:
+            if not hasattr(self, 'export_available') or not self.export_available:
+                messagebox.showerror("Error", "Draft tracking system not available")
+                return
+            
+            if not hasattr(self, 'draft_tracking_integrator') or not self.draft_tracking_integrator:
+                messagebox.showerror("Error", "Draft tracking system not initialized")
+                return
+            
+            # Get current status first
+            status = self.draft_tracking_integrator.get_current_draft_status()
+            
+            if not status['draft_active']:
+                messagebox.showinfo("No Active Draft", "No draft is currently being tracked.")
+                return
+            
+            # Confirm stopping
+            result = messagebox.askyesno(
+                "Stop Draft Tracking",
+                f"Are you sure you want to stop tracking the current draft?\n\nDraft ID: {status['draft_id']}\nCards picked: {status['card_picks_count']}/30\n\nThis will complete the draft and make it available for export."
+            )
+            
+            if result:
+                draft_summary = self.draft_tracking_integrator.complete_draft_tracking()
+                
+                if draft_summary:
+                    messagebox.showinfo(
+                        "Draft Tracking Stopped",
+                        f"Draft tracking completed successfully!\n\nDraft ID: {draft_summary.draft_id}\nTotal picks: {len(draft_summary.pick_history)}\n\nYou can now export this draft from the Draft menu."
+                    )
+                    self.log_text(f"✅ Completed draft tracking: {draft_summary.draft_id}")
+                else:
+                    messagebox.showerror("Error", "Failed to complete draft tracking")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to stop draft tracking: {e}")
+            messagebox.showerror("Error", f"Failed to stop draft tracking: {e}")
+    
+    def show_draft_status(self):
+        """Show current draft tracking status."""
+        try:
+            if not hasattr(self, 'export_available') or not self.export_available:
+                messagebox.showerror("Error", "Draft tracking system not available")
+                return
+            
+            if not hasattr(self, 'draft_tracking_integrator') or not self.draft_tracking_integrator:
+                messagebox.showerror("Error", "Draft tracking system not initialized")
+                return
+            
+            # Get current status
+            status = self.draft_tracking_integrator.get_current_draft_status()
+            statistics = self.draft_tracking_integrator.get_draft_statistics()
+            
+            # Format status message
+            if status['draft_active']:
+                status_msg = f"""🟢 ACTIVE DRAFT TRACKING
+                
+Draft ID: {status['draft_id']}
+Started: {status['session_start_time']}
+Hero Selected: {'✅' if status['hero_selection_completed'] else '❌'}
+Cards Picked: {status['card_picks_count']}/30
+Auto-Tracking: {'Enabled' if status['auto_tracking_enabled'] else 'Disabled'}
+Auto-Export: {'Enabled' if status['auto_export_enabled'] else 'Disabled'}
+
+SYSTEM STATISTICS
+Total Drafts Tracked: {statistics.get('total_drafts', 0)}
+Total Exports: {statistics.get('total_exports', 0)}
+Available Formats: {', '.join(status['export_formats'])}"""
+            else:
+                status_msg = f"""⚪ NO ACTIVE DRAFT
+                
+No draft is currently being tracked.
+
+SYSTEM STATISTICS
+Total Drafts Tracked: {statistics.get('total_drafts', 0)}
+Total Exports: {statistics.get('total_exports', 0)}
+Auto-Tracking: {'Enabled' if status['auto_tracking_enabled'] else 'Disabled'}
+Auto-Export: {'Enabled' if status['auto_export_enabled'] else 'Disabled'}
+Available Formats: {', '.join(status['export_formats'])}
+
+Start a new draft from the Draft menu to begin tracking."""
+            
+            messagebox.showinfo("Draft Tracking Status", status_msg)
+            
+        except Exception as e:
+            self.logger.error(f"Failed to show draft status: {e}")
+            messagebox.showerror("Error", f"Failed to show draft status: {e}")
+    
+    def export_current_draft(self):
+        """Export the current or most recent draft."""
+        try:
+            if not hasattr(self, 'export_available') or not self.export_available:
+                messagebox.showerror("Error", "Draft export system not available")
+                return
+            
+            if not hasattr(self, 'draft_tracking_integrator') or not self.draft_tracking_integrator:
+                messagebox.showerror("Error", "Draft tracking system not initialized")
+                return
+            
+            # Get current status
+            status = self.draft_tracking_integrator.get_current_draft_status()
+            
+            if status['draft_active']:
+                # Current draft is active - ask if they want to complete it first
+                result = messagebox.askyesno(
+                    "Complete Draft First?",
+                    f"A draft is currently active (ID: {status['draft_id']}).\n\nWould you like to complete it first before exporting?\n\nClick 'Yes' to complete and export, or 'No' to export the current state as a preview."
+                )
+                
+                if result:
+                    # Complete the draft first
+                    draft_summary = self.draft_tracking_integrator.complete_draft_tracking()
+                    if not draft_summary:
+                        messagebox.showerror("Error", "Failed to complete draft")
+                        return
+                else:
+                    # Export current state as preview
+                    messagebox.showinfo(
+                        "Preview Export",
+                        "The export dialog will show a preview of the current draft state.\n\nNote: This is not a complete draft export."
+                    )
+            
+            # Show export dialog
+            self.show_export_dialog()
+            
+        except Exception as e:
+            self.logger.error(f"Failed to export current draft: {e}")
+            messagebox.showerror("Error", f"Failed to export current draft: {e}")
+    
+    def show_export_dialog(self):
+        """Show the draft export dialog."""
+        try:
+            if not hasattr(self, 'export_available') or not self.export_available:
+                messagebox.showerror("Error", "Draft export system not available")
+                return
+            
+            if not hasattr(self, 'draft_tracking_integrator') or not self.draft_tracking_integrator:
+                messagebox.showerror("Error", "Draft tracking system not initialized")
+                return
+            
+            # Show export dialog
+            self.draft_tracking_integrator.show_export_dialog(parent=self.root)
+            
+        except Exception as e:
+            self.logger.error(f"Failed to show export dialog: {e}")
+            messagebox.showerror("Error", f"Failed to show export dialog: {e}")
+    
+    def configure_draft_tracking(self):
+        """Configure automatic draft tracking settings."""
+        try:
+            if not hasattr(self, 'export_available') or not self.export_available:
+                messagebox.showerror("Error", "Draft tracking system not available")
+                return
+            
+            if not hasattr(self, 'draft_tracking_integrator') or not self.draft_tracking_integrator:
+                messagebox.showerror("Error", "Draft tracking system not initialized")
+                return
+            
+            # Create configuration dialog
+            config_dialog = tk.Toplevel(self.root)
+            config_dialog.title("Draft Tracking Configuration")
+            config_dialog.geometry("400x300")
+            config_dialog.configure(bg='#2C3E50')
+            config_dialog.transient(self.root)
+            config_dialog.grab_set()
+            
+            # Get current status
+            status = self.draft_tracking_integrator.get_current_draft_status()
+            
+            # Configuration options
+            main_frame = tk.Frame(config_dialog, bg='#2C3E50')
+            main_frame.pack(fill='both', expand=True, padx=20, pady=20)
+            
+            tk.Label(
+                main_frame,
+                text="⚙️ Draft Tracking Configuration",
+                font=('Arial', 14, 'bold'),
+                fg='#ECF0F1',
+                bg='#2C3E50'
+            ).pack(pady=(0, 20))
+            
+            # Auto-tracking option
+            auto_tracking_var = tk.BooleanVar(value=status['auto_tracking_enabled'])
+            tk.Checkbutton(
+                main_frame,
+                text="Enable automatic draft tracking",
+                variable=auto_tracking_var,
+                fg='#ECF0F1',
+                bg='#2C3E50',
+                selectcolor='#34495E',
+                font=('Arial', 10)
+            ).pack(anchor='w', pady=5)
+            
+            # Auto-export option
+            auto_export_var = tk.BooleanVar(value=status['auto_export_enabled'])
+            tk.Checkbutton(
+                main_frame,
+                text="Enable automatic export on draft completion",
+                variable=auto_export_var,
+                fg='#ECF0F1',
+                bg='#2C3E50',
+                selectcolor='#34495E',
+                font=('Arial', 10)
+            ).pack(anchor='w', pady=5)
+            
+            # Export formats
+            tk.Label(
+                main_frame,
+                text="Export Formats:",
+                fg='#ECF0F1',
+                bg='#2C3E50',
+                font=('Arial', 10, 'bold')
+            ).pack(anchor='w', pady=(15, 5))
+            
+            format_vars = {}
+            available_formats = ['json', 'csv', 'html', 'txt']
+            current_formats = status['export_formats']
+            
+            for fmt in available_formats:
+                var = tk.BooleanVar(value=fmt in current_formats)
+                tk.Checkbutton(
+                    main_frame,
+                    text=fmt.upper(),
+                    variable=var,
+                    fg='#ECF0F1',
+                    bg='#2C3E50',
+                    selectcolor='#34495E',
+                    font=('Arial', 9)
+                ).pack(anchor='w', padx=20, pady=2)
+                format_vars[fmt] = var
+            
+            # Buttons
+            button_frame = tk.Frame(main_frame, bg='#2C3E50')
+            button_frame.pack(fill='x', pady=(20, 0))
+            
+            def save_config():
+                # Get selected formats
+                selected_formats = [fmt for fmt, var in format_vars.items() if var.get()]
+                if not selected_formats:
+                    messagebox.showwarning("No Formats", "Please select at least one export format.")
+                    return
+                
+                # Apply configuration
+                self.draft_tracking_integrator.configure_auto_tracking(
+                    enabled=auto_tracking_var.get(),
+                    auto_export=auto_export_var.get(),
+                    export_formats=selected_formats
+                )
+                
+                messagebox.showinfo("Success", "Draft tracking configuration saved!")
+                config_dialog.destroy()
+            
+            tk.Button(
+                button_frame,
+                text="💾 Save",
+                command=save_config,
+                bg='#27AE60',
+                fg='white',
+                font=('Arial', 10)
+            ).pack(side='right', padx=5)
+            
+            tk.Button(
+                button_frame,
+                text="❌ Cancel",
+                command=config_dialog.destroy,
+                bg='#E74C3C',
+                fg='white',
+                font=('Arial', 10)
+            ).pack(side='right', padx=5)
+            
+        except Exception as e:
+            self.logger.error(f"Failed to configure draft tracking: {e}")
+            messagebox.showerror("Error", f"Failed to configure draft tracking: {e}")
+    
+    # =========================================================================
+    # System Health Monitor Methods
+    # =========================================================================
+    
+    def _check_gui_health(self) -> Dict[str, Any]:
+        """Health check for the main GUI component."""
+        try:
+            import psutil
+            import os
+            
+            # Get current process info
+            process = psutil.Process(os.getpid())
+            memory_info = process.memory_info()
+            memory_mb = memory_info.rss / (1024 * 1024)  # Convert to MB
+            
+            # Check if GUI is responsive
+            gui_responsive = True
+            try:
+                if hasattr(self, 'root') and self.root:
+                    self.root.update_idletasks()
+            except:
+                gui_responsive = False
+            
+            # Calculate uptime
+            uptime_seconds = time.time() - getattr(self, '_gui_start_time', time.time())
+            
+            # Determine health status
+            from arena_bot.ai_v2.system_health_monitor import HealthStatus
+            
+            status = HealthStatus.HEALTHY
+            if memory_mb > 1000 or not gui_responsive:
+                status = HealthStatus.CRITICAL
+            elif memory_mb > 500:
+                status = HealthStatus.WARNING
+            
+            return {
+                'status': status.value,
+                'metrics': {
+                    'memory_usage_mb': memory_mb,
+                    'gui_responsive': gui_responsive,
+                    'uptime_seconds': uptime_seconds,
+                    'threads_active': threading.active_count()
+                }
+            }
+            
+        except Exception as e:
+            from arena_bot.ai_v2.system_health_monitor import HealthStatus
+            return {
+                'status': HealthStatus.CRITICAL.value,
+                'error': f"GUI health check failed: {e}"
+            }
+    
+    def show_system_health(self):
+        """Show comprehensive system health status."""
+        try:
+            if not hasattr(self, 'health_available') or not self.health_available:
+                messagebox.showerror("Error", "System health monitoring not available")
+                return
+            
+            if not hasattr(self, 'health_monitor') or not self.health_monitor:
+                messagebox.showerror("Error", "Health monitor not initialized")
+                return
+            
+            # Get system health data
+            health_data = self.health_monitor.get_system_health()
+            
+            # Create health status window
+            health_window = tk.Toplevel(self.root)
+            health_window.title("System Health Monitor")
+            health_window.geometry("800x600")
+            health_window.configure(bg='#2C3E50')
+            health_window.transient(self.root)
+            
+            # Main frame with scrollbar
+            main_frame = tk.Frame(health_window, bg='#2C3E50')
+            main_frame.pack(fill='both', expand=True, padx=20, pady=20)
+            
+            canvas = tk.Canvas(main_frame, bg='#2C3E50')
+            scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
+            scrollable_frame = tk.Frame(canvas, bg='#2C3E50')
+            
+            scrollable_frame.bind(
+                "<Configure>",
+                lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+            )
+            
+            canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+            canvas.configure(yscrollcommand=scrollbar.set)
+            
+            canvas.pack(side="left", fill="both", expand=True)
+            scrollbar.pack(side="right", fill="y")
+            
+            # Title
+            tk.Label(
+                scrollable_frame,
+                text="🏥 System Health Monitor",
+                font=('Arial', 16, 'bold'),
+                fg='#ECF0F1',
+                bg='#2C3E50'
+            ).pack(pady=(0, 20))
+            
+            # Overall status
+            status_color = {
+                'healthy': '#27AE60',
+                'warning': '#F39C12', 
+                'critical': '#E74C3C',
+                'unknown': '#95A5A6'
+            }.get(health_data['overall_status'], '#95A5A6')
+            
+            status_frame = tk.Frame(scrollable_frame, bg='#34495E', relief='ridge', bd=2)
+            status_frame.pack(fill='x', pady=10)
+            
+            tk.Label(
+                status_frame,
+                text=f"Overall Status: {health_data['overall_status'].upper()}",
+                font=('Arial', 14, 'bold'),
+                fg=status_color,
+                bg='#34495E'
+            ).pack(pady=10)
+            
+            # System metrics
+            metrics_frame = tk.LabelFrame(
+                scrollable_frame,
+                text="System Metrics",
+                font=('Arial', 12, 'bold'),
+                fg='#ECF0F1',
+                bg='#34495E'
+            )
+            metrics_frame.pack(fill='x', pady=10)
+            
+            metrics_text = f"""System Uptime: {health_data['system_uptime_hours']:.1f} hours
+Total Components: {health_data['total_components']}
+Healthy Components: {health_data['healthy_components']}
+Warning Components: {health_data['warning_components']}
+Critical Components: {health_data['critical_components']}
+Active Alerts: {health_data['system_metrics'].get('active_alerts', 0)}
+Total Alerts: {health_data['system_metrics'].get('total_alerts', 0)}"""
+            
+            tk.Label(
+                metrics_frame,
+                text=metrics_text,
+                font=('Arial', 10),
+                fg='#ECF0F1',
+                bg='#34495E',
+                justify='left'
+            ).pack(padx=20, pady=10, anchor='w')
+            
+            # Component health
+            components_frame = tk.LabelFrame(
+                scrollable_frame,
+                text="Component Health",
+                font=('Arial', 12, 'bold'),
+                fg='#ECF0F1',
+                bg='#34495E'
+            )
+            components_frame.pack(fill='x', pady=10)
+            
+            for comp_name, comp_data in health_data['component_health'].items():
+                comp_color = {
+                    'healthy': '#27AE60',
+                    'warning': '#F39C12',
+                    'critical': '#E74C3C',
+                    'unknown': '#95A5A6',
+                    'offline': '#7F8C8D'
+                }.get(comp_data['status'], '#95A5A6')
+                
+                comp_text = f"{comp_name}: {comp_data['status'].upper()} (Errors: {comp_data['error_count']}, Uptime: {comp_data['uptime_hours']:.1f}h)"
+                
+                tk.Label(
+                    components_frame,
+                    text=comp_text,
+                    font=('Arial', 9),
+                    fg=comp_color,
+                    bg='#34495E'
+                ).pack(anchor='w', padx=20, pady=2)
+            
+            # Recent alerts
+            if health_data['recent_alerts']:
+                alerts_frame = tk.LabelFrame(
+                    scrollable_frame,
+                    text="Recent Alerts",
+                    font=('Arial', 12, 'bold'),
+                    fg='#ECF0F1',
+                    bg='#34495E'
+                )
+                alerts_frame.pack(fill='x', pady=10)
+                
+                for alert in health_data['recent_alerts'][-5:]:  # Last 5 alerts
+                    alert_color = {
+                        'info': '#3498DB',
+                        'warning': '#F39C12',
+                        'error': '#E67E22',
+                        'critical': '#E74C3C'
+                    }.get(alert['severity'], '#95A5A6')
+                    
+                    alert_text = f"[{alert['severity'].upper()}] {alert['component']}: {alert['message']}"
+                    
+                    tk.Label(
+                        alerts_frame,
+                        text=alert_text,
+                        font=('Arial', 8),
+                        fg=alert_color,
+                        bg='#34495E',
+                        wraplength=700
+                    ).pack(anchor='w', padx=20, pady=2)
+            
+            # Buttons
+            button_frame = tk.Frame(scrollable_frame, bg='#2C3E50')
+            button_frame.pack(fill='x', pady=20)
+            
+            tk.Button(
+                button_frame,
+                text="🔄 Refresh",
+                command=lambda: (health_window.destroy(), self.show_system_health()),
+                bg='#3498DB',
+                fg='white',
+                font=('Arial', 10)
+            ).pack(side='left', padx=5)
+            
+            tk.Button(
+                button_frame,
+                text="📊 Export Report",
+                command=lambda: self.export_health_report(),
+                bg='#2ECC71',
+                fg='white',
+                font=('Arial', 10)
+            ).pack(side='left', padx=5)
+            
+            tk.Button(
+                button_frame,
+                text="❌ Close",
+                command=health_window.destroy,
+                bg='#E74C3C',
+                fg='white',
+                font=('Arial', 10)
+            ).pack(side='right', padx=5)
+            
+        except Exception as e:
+            self.logger.error(f"Failed to show system health: {e}")
+            messagebox.showerror("Error", f"Failed to show system health: {e}")
+    
+    def export_health_report(self):
+        """Export system health report to file."""
+        try:
+            if not hasattr(self, 'health_available') or not self.health_available:
+                messagebox.showerror("Error", "System health monitoring not available")
+                return
+            
+            # Get health report
+            report = self.health_monitor.export_health_report('json')
+            
+            # Save to file
+            from tkinter import filedialog
+            import json
+            
+            filename = filedialog.asksaveasfilename(
+                title="Export Health Report",
+                defaultextension=".json",
+                filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+            )
+            
+            if filename:
+                with open(filename, 'w') as f:
+                    f.write(report)
+                
+                messagebox.showinfo(
+                    "Export Complete",
+                    f"Health report exported successfully to:\n{filename}"
+                )
+                self.log_text(f"✅ Health report exported: {filename}")
+                
+        except Exception as e:
+            self.logger.error(f"Failed to export health report: {e}")
+            messagebox.showerror("Error", f"Failed to export health report: {e}")
+    
+    def run_manual_health_check(self):
+        """Run manual health check on all components."""
+        try:
+            if not hasattr(self, 'health_available') or not self.health_available:
+                messagebox.showerror("Error", "System health monitoring not available")
+                return
+            
+            # Show progress dialog
+            progress_dialog = tk.Toplevel(self.root)
+            progress_dialog.title("Running Health Check")
+            progress_dialog.geometry("400x200")
+            progress_dialog.configure(bg='#2C3E50')
+            progress_dialog.transient(self.root)
+            progress_dialog.grab_set()
+            
+            tk.Label(
+                progress_dialog,
+                text="🔄 Running Health Check...",
+                font=('Arial', 12, 'bold'),
+                fg='#ECF0F1',
+                bg='#2C3E50'
+            ).pack(pady=20)
+            
+            progress_text = scrolledtext.ScrolledText(
+                progress_dialog,
+                height=8,
+                bg='#34495E',
+                fg='#ECF0F1',
+                font=('Consolas', 9)
+            )
+            progress_text.pack(fill='both', expand=True, padx=20, pady=10)
+            
+            # Run health checks
+            def run_checks():
+                try:
+                    progress_text.insert(tk.END, "Starting health check...\n")
+                    progress_text.update()
+                    
+                    # Force health check on all components
+                    results = self.health_monitor.run_health_check(force=True)
+                    
+                    for component, result in results.items():
+                        status = result.get('status', 'unknown')
+                        response_time = result.get('response_time_ms', 0)
+                        error = result.get('error')
+                        
+                        if error:
+                            progress_text.insert(tk.END, f"❌ {component}: {status} - {error}\n")
+                        else:
+                            progress_text.insert(tk.END, f"✅ {component}: {status} ({response_time:.1f}ms)\n")
+                        
+                        progress_text.update()
+                        progress_text.see(tk.END)
+                    
+                    progress_text.insert(tk.END, "\nHealth check completed!\n")
+                    progress_text.update()
+                    
+                    # Add close button
+                    tk.Button(
+                        progress_dialog,
+                        text="✅ Close",
+                        command=progress_dialog.destroy,
+                        bg='#27AE60',
+                        fg='white',
+                        font=('Arial', 10)
+                    ).pack(pady=10)
+                    
+                except Exception as e:
+                    progress_text.insert(tk.END, f"❌ Health check failed: {e}\n")
+                    progress_text.update()
+            
+            # Run checks in background
+            threading.Thread(target=run_checks, daemon=True).start()
+            
+        except Exception as e:
+            self.logger.error(f"Failed to run manual health check: {e}")
+            messagebox.showerror("Error", f"Failed to run manual health check: {e}")
+    
+    def configure_health_monitoring(self):
+        """Configure health monitoring settings."""
+        try:
+            if not hasattr(self, 'health_available') or not self.health_available:
+                messagebox.showerror("Error", "System health monitoring not available")
+                return
+            
+            # Create configuration dialog
+            config_dialog = tk.Toplevel(self.root)
+            config_dialog.title("Health Monitoring Configuration")
+            config_dialog.geometry("500x400")
+            config_dialog.configure(bg='#2C3E50')
+            config_dialog.transient(self.root)
+            config_dialog.grab_set()
+            
+            main_frame = tk.Frame(config_dialog, bg='#2C3E50')
+            main_frame.pack(fill='both', expand=True, padx=20, pady=20)
+            
+            tk.Label(
+                main_frame,
+                text="⚙️ Health Monitoring Configuration",
+                font=('Arial', 14, 'bold'),
+                fg='#ECF0F1',
+                bg='#2C3E50'
+            ).pack(pady=(0, 20))
+            
+            # Current system status
+            system_health = self.health_monitor.get_system_health()
+            
+            status_frame = tk.LabelFrame(
+                main_frame,
+                text="Current Status",
+                font=('Arial', 12, 'bold'),
+                fg='#ECF0F1',
+                bg='#34495E'
+            )
+            status_frame.pack(fill='x', pady=10)
+            
+            status_text = f"""Overall Status: {system_health['overall_status'].upper()}
+Monitoring Enabled: {'Yes' if system_health['monitoring_enabled'] else 'No'}
+Components Monitored: {system_health['total_components']}
+Active Alerts: {system_health['system_metrics'].get('active_alerts', 0)}
+System Uptime: {system_health['system_uptime_hours']:.1f} hours"""
+            
+            tk.Label(
+                status_frame,
+                text=status_text,
+                font=('Arial', 10),
+                fg='#ECF0F1',
+                bg='#34495E',
+                justify='left'
+            ).pack(padx=20, pady=10, anchor='w')
+            
+            # Configuration options
+            options_frame = tk.LabelFrame(
+                main_frame,
+                text="Configuration Options",
+                font=('Arial', 12, 'bold'),
+                fg='#ECF0F1',
+                bg='#34495E'
+            )
+            options_frame.pack(fill='x', pady=10)
+            
+            # Monitoring interval
+            tk.Label(
+                options_frame,
+                text="Monitoring Interval (seconds):",
+                fg='#ECF0F1',
+                bg='#34495E',
+                font=('Arial', 10)
+            ).grid(row=0, column=0, sticky='w', padx=20, pady=5)
+            
+            interval_var = tk.IntVar(value=self.health_monitor.monitoring_interval)
+            interval_scale = tk.Scale(
+                options_frame,
+                from_=10,
+                to=300,
+                orient='horizontal',
+                variable=interval_var,
+                fg='#ECF0F1',
+                bg='#34495E'
+            )
+            interval_scale.grid(row=0, column=1, sticky='ew', padx=20, pady=5)
+            
+            # Enable/disable monitoring
+            monitoring_var = tk.BooleanVar(value=self.health_monitor.monitoring_enabled)
+            tk.Checkbutton(
+                options_frame,
+                text="Enable continuous monitoring",
+                variable=monitoring_var,
+                fg='#ECF0F1',
+                bg='#34495E',
+                selectcolor='#2C3E50',
+                font=('Arial', 10)
+            ).grid(row=1, column=0, columnspan=2, sticky='w', padx=20, pady=5)
+            
+            options_frame.columnconfigure(1, weight=1)
+            
+            # Buttons
+            button_frame = tk.Frame(main_frame, bg='#2C3E50')
+            button_frame.pack(fill='x', pady=20)
+            
+            def save_config():
+                try:
+                    # Update monitoring interval
+                    self.health_monitor.monitoring_interval = interval_var.get()
+                    
+                    # Update monitoring enabled/disabled
+                    self.health_monitor.monitoring_enabled = monitoring_var.get()
+                    
+                    messagebox.showinfo("Success", "Health monitoring configuration updated!")
+                    config_dialog.destroy()
+                    
+                except Exception as e:
+                    messagebox.showerror("Error", f"Failed to save configuration: {e}")
+            
+            tk.Button(
+                button_frame,
+                text="💾 Save",
+                command=save_config,
+                bg='#27AE60',
+                fg='white',
+                font=('Arial', 10)
+            ).pack(side='right', padx=5)
+            
+            tk.Button(
+                button_frame,
+                text="❌ Cancel",
+                command=config_dialog.destroy,
+                bg='#E74C3C',
+                fg='white',
+                font=('Arial', 10)
+            ).pack(side='right', padx=5)
+            
+        except Exception as e:
+            self.logger.error(f"Failed to configure health monitoring: {e}")
+            messagebox.showerror("Error", f"Failed to configure health monitoring: {e}")
+    
+    def setup_ai_coach_interface(self):
+        """Setup the AI Coach chat interface."""
+        try:
+            # AI Coach Chat Frame
+            coach_frame = tk.LabelFrame(
+                self.root,
+                text="🤖 AI COACH - Socratic Teaching & Strategic Questions",
+                font=('Arial', 10, 'bold'),
+                fg='#E67E22',  # Orange for the coach
+                bg='#2C3E50'
+            )
+            coach_frame.pack(fill='x', padx=10, pady=5)
+            
+            # Check if coach is available
+            if not hasattr(self, 'coach_available') or not self.coach_available:
+                # Show unavailable message
+                unavailable_label = tk.Label(
+                    coach_frame,
+                    text="⚠️ AI Coach not available - Check console for errors",
+                    fg='#E74C3C',
+                    bg='#2C3E50',
+                    font=('Arial', 9)
+                )
+                unavailable_label.pack(pady=10)
+                return
+            
+            # Chat display area
+            chat_display_frame = tk.Frame(coach_frame, bg='#2C3E50')
+            chat_display_frame.pack(fill='both', expand=True, padx=5, pady=5)
+            
+            # Chat history text widget with scrollbar
+            chat_scroll_frame = tk.Frame(chat_display_frame, bg='#2C3E50')
+            chat_scroll_frame.pack(fill='both', expand=True)
+            
+            self.chat_display = tk.Text(
+                chat_scroll_frame,
+                height=8,
+                bg='#34495E',
+                fg='#ECF0F1',
+                font=('Arial', 9),
+                wrap=tk.WORD,
+                state='disabled'  # Read-only
+            )
+            
+            chat_scrollbar = tk.Scrollbar(chat_scroll_frame, command=self.chat_display.yview)
+            self.chat_display.config(yscrollcommand=chat_scrollbar.set)
+            
+            self.chat_display.pack(side='left', fill='both', expand=True)
+            chat_scrollbar.pack(side='right', fill='y')
+            
+            # Chat input frame
+            input_frame = tk.Frame(coach_frame, bg='#2C3E50')
+            input_frame.pack(fill='x', padx=5, pady=5)
+            
+            # Chat input field
+            self.chat_input = tk.Entry(
+                input_frame,
+                bg='#34495E',
+                fg='#ECF0F1',
+                font=('Arial', 10),
+                insertbackground='#ECF0F1'
+            )
+            self.chat_input.pack(side='left', fill='x', expand=True, padx=(0, 5))
+            
+            # Send button
+            send_button = tk.Button(
+                input_frame,
+                text="💬 Ask Coach",
+                font=('Arial', 9, 'bold'),
+                bg='#E67E22',
+                fg='white',
+                command=self.send_chat_message,
+                padx=10
+            )
+            send_button.pack(side='right')
+            
+            # Bind Enter key to send message
+            self.chat_input.bind('<Return>', lambda e: self.send_chat_message())
+            
+            # Quick question buttons
+            quick_frame = tk.Frame(coach_frame, bg='#2C3E50')
+            quick_frame.pack(fill='x', padx=5, pady=(0, 5))
+            
+            tk.Label(
+                quick_frame,
+                text="Quick Questions:",
+                fg='#BDC3C7',
+                bg='#2C3E50',
+                font=('Arial', 8)
+            ).pack(side='left')
+            
+            quick_questions = [
+                ("Why this pick?", "Why should I pick this card?"),
+                ("Curve help", "How is my mana curve looking?"),
+                ("Archetype advice", "What archetype should I focus on?"),
+                ("Meta tips", "Any meta considerations for this draft?")
+            ]
+            
+            for button_text, question in quick_questions:
+                btn = tk.Button(
+                    quick_frame,
+                    text=button_text,
+                    font=('Arial', 7),
+                    bg='#95A5A6',
+                    fg='white',
+                    command=lambda q=question: self.send_quick_question(q),
+                    padx=5
+                )
+                btn.pack(side='left', padx=2)
+            
+            # Welcome message
+            self.add_chat_message("Coach", "👋 Welcome! I'm your AI draft coach. Ask me about strategy, card choices, or any draft questions. I'll use Socratic questioning to help you learn!")
+            
+        except Exception as e:
+            print(f"⚠️ Failed to setup AI coach interface: {e}")
+    
+    def send_chat_message(self):
+        """Send a chat message to the AI coach."""
+        try:
+            if not hasattr(self, 'conversational_coach') or not self.conversational_coach:
+                messagebox.showerror("Error", "AI Coach not available")
+                return
+            
+            # Get user message
+            user_message = self.chat_input.get().strip()
+            if not user_message:
+                return
+            
+            # Clear input
+            self.chat_input.delete(0, tk.END)
+            
+            # Add user message to chat
+            self.add_chat_message("You", user_message)
+            
+            # Prepare context for the coach
+            context = self.get_current_draft_context()
+            
+            # Get coach response
+            try:
+                coach_response = self.conversational_coach.process_user_query(user_message, context)
+                self.add_chat_message("Coach", coach_response)
+            except Exception as e:
+                self.add_chat_message("Coach", f"Sorry, I encountered an error: {e}")
+                self.logger.error(f"Coach response error: {e}")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to send message: {e}")
+    
+    def send_quick_question(self, question):
+        """Send a quick question to the coach."""
+        self.chat_input.delete(0, tk.END)
+        self.chat_input.insert(0, question)
+        self.send_chat_message()
+    
+    def add_chat_message(self, sender, message):
+        """Add a message to the chat display."""
+        try:
+            self.chat_display.config(state='normal')
+            
+            # Add timestamp
+            timestamp = datetime.now().strftime("%H:%M")
+            
+            # Format message based on sender
+            if sender == "You":
+                formatted_message = f"[{timestamp}] 🧑 {sender}: {message}\n\n"
+            else:  # Coach
+                formatted_message = f"[{timestamp}] 🤖 {sender}: {message}\n\n"
+            
+            # Insert message
+            self.chat_display.insert(tk.END, formatted_message)
+            
+            # Scroll to bottom
+            self.chat_display.see(tk.END)
+            
+            # Make read-only again
+            self.chat_display.config(state='disabled')
+            
+        except Exception as e:
+            print(f"Error adding chat message: {e}")
+    
+    def get_current_draft_context(self):
+        """Get current draft context for the coach."""
+        try:
+            context = {
+                'draft_stage': 'unknown',
+                'hero_class': getattr(self, 'current_hero', None),
+                'in_draft': getattr(self, 'in_draft', False),
+                'draft_picks_count': getattr(self, 'draft_picks_count', 0),
+                'last_analysis': None
+            }
+            
+            # Add last analysis result if available
+            if hasattr(self, 'last_full_analysis_result') and self.last_full_analysis_result:
+                context['last_analysis'] = self.last_full_analysis_result
+                context['draft_stage'] = 'card_selection'
+            
+            # Add hero context if in draft
+            if self.in_draft and self.current_hero:
+                context['hero_class'] = self.current_hero
+                context['draft_stage'] = 'hero_selected' if self.draft_picks_count == 0 else 'drafting_cards'
+            
+            # Add archetype if available from last analysis
+            if (hasattr(self, 'last_full_analysis_result') and 
+                self.last_full_analysis_result and 
+                hasattr(self.last_full_analysis_result, 'deck_analysis')):
+                deck_analysis = self.last_full_analysis_result.deck_analysis
+                if isinstance(deck_analysis, dict) and 'archetype' in deck_analysis:
+                    context['archetype'] = deck_analysis['archetype']
+            
+            return context
+            
+        except Exception as e:
+            self.logger.error(f"Error getting draft context: {e}")
+            return {'draft_stage': 'unknown'}
     
     def setup_draft_progression_display(self):
         """Setup the draft progression display showing Hero → Cards relationship."""
