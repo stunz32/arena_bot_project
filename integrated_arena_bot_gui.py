@@ -299,6 +299,7 @@ class IntegratedArenaBotGUI:
         self.last_detection_result = None
         self.result_queue = Queue()
         self.ui_queue = Queue()
+        self.event_queue = Queue()  # Queue for log monitor events
 
         # Step 2: Initialize all subsystems
         self.init_log_monitoring()
@@ -339,6 +340,7 @@ class IntegratedArenaBotGUI:
         # Step 4: Start background processes AFTER GUI is built
         if self.root:
             self.root.after(100, self._process_ui_queue)
+            self.root.after(100, self._check_for_events)  # Start event loop for automation
         
         self._start_background_cache_builder()
         
@@ -688,6 +690,42 @@ class IntegratedArenaBotGUI:
         finally:
             # Schedule the next check
             self.root.after(100, self._process_ui_queue)
+    
+    def _check_for_events(self):
+        """Check for events from log monitor and other automation sources."""
+        try:
+            while not self.event_queue.empty():
+                try:
+                    # Get event from queue
+                    event = self.event_queue.get_nowait()
+                    self._process_automation_event(event)
+                except Exception as e:
+                    self.logger.error(f"Error processing event: {e}")
+        except Exception as e:
+            self.logger.error(f"Error in event loop: {e}")
+        finally:
+            # Schedule the next check
+            self.root.after(100, self._check_for_events)
+    
+    def _process_automation_event(self, event):
+        """Process automation events from log monitor."""
+        try:
+            event_type = event.get('type', 'unknown')
+            
+            if event_type == 'HERO_CHOICES_READY':
+                self.logger.info("🎯 Hero choices detected - automation ready")
+                # Could trigger hero selection analysis here
+                
+            elif event_type == 'CARD_CHOICES_READY':
+                self.logger.info("🎯 Card choices detected - triggering automatic analysis")
+                # Trigger automatic screenshot analysis
+                self.manual_screenshot()
+                
+            else:
+                self.logger.debug(f"🔄 Received event: {event_type}")
+                
+        except Exception as e:
+            self.logger.error(f"Error processing automation event: {e}")
     
     def get_card_name(self, card_code):
         """
@@ -1134,7 +1172,7 @@ class IntegratedArenaBotGUI:
         try:
             from hearthstone_log_monitor import HearthstoneLogMonitor
             
-            self.log_monitor = HearthstoneLogMonitor()
+            self.log_monitor = HearthstoneLogMonitor(event_queue=self.event_queue)
             self.setup_log_callbacks()
             
             print("✅ Log monitoring system loaded")
@@ -4263,15 +4301,71 @@ System Uptime: {system_health['system_uptime_hours']:.1f} hours"""
                     card_region = screenshot[y:y+h, x:x+w]
                     match = self.histogram_matcher.match_card(card_region)
                     if match:
-                        detected_cards.append({
+                        # Save extracted card region to temporary file
+                        temp_image_path = None
+                        try:
+                            import tempfile
+                            import cv2
+                            temp_fd, temp_path = tempfile.mkstemp(suffix='.png', prefix=f'card_{i}_')
+                            os.close(temp_fd)  # Close file descriptor, we'll use the path
+                            cv2.imwrite(temp_path, card_region)
+                            temp_image_path = temp_path
+                            logs.append(f"   💾 Saved card {i+1} region to: {temp_path}")
+                        except Exception as e:
+                            logs.append(f"   ⚠️ Failed to save card {i+1} region: {e}")
+                        
+                        card_data = {
                             'card_code': match.card_code,
                             'card_name': self.get_card_name(match.card_code),
                             'confidence': match.confidence,
                             'region': (x,y,w,h)
-                        })
+                        }
+                        
+                        # Add image path if successfully saved
+                        if temp_image_path:
+                            card_data['image_path'] = temp_image_path
+                            
+                        detected_cards.append(card_data)
         
         recommendation = None
-        if self.advisor and len(detected_cards) >= 3:
+        ai_decision = None
+        
+        # Use new AI v2 GrandmasterAdvisor system
+        if hasattr(self, 'grandmaster_advisor') and self.grandmaster_advisor and len(detected_cards) >= 3:
+            card_codes = [c['card_code'] for c in detected_cards]
+            try:
+                # Create DeckState object for AI v2 system
+                from arena_bot.ai_v2.data_models import DeckState
+                deck_state = DeckState(
+                    hero_class=self.current_hero or 'NEUTRAL',
+                    drafted_cards=[],  # Empty for now - this would be populated in a real draft
+                    picks_made=0,
+                    wins=0,
+                    losses=0
+                )
+                
+                # Get AI v2 recommendation
+                ai_decision = self.grandmaster_advisor.get_recommendation(deck_state, card_codes)
+                
+                if ai_decision:
+                    logs.append(f"🤖 AI v2 recommendation: Card {ai_decision.recommended_pick_index + 1}")
+                    
+                    # Create legacy-compatible recommendation structure for backward compatibility
+                    recommendation = {
+                        'recommended_pick': ai_decision.recommended_pick_index + 1,
+                        'recommended_card': card_codes[ai_decision.recommended_pick_index] if ai_decision.recommended_pick_index < len(card_codes) else 'Unknown',
+                        'reasoning': ai_decision.comparative_explanation,
+                        'confidence': ai_decision.confidence_level,
+                        'card_details': ai_decision.all_offered_cards_analysis
+                    }
+                else:
+                    logs.append("⚠️ AI v2 returned no recommendation")
+                    
+            except Exception as e:
+                logs.append(f"⚠️ AI v2 recommendation failed: {e}")
+                
+        # Fallback to legacy advisor if AI v2 fails or unavailable
+        elif self.advisor and len(detected_cards) >= 3:
             card_codes = [c['card_code'] for c in detected_cards]
             try:
                 choice = self.advisor.analyze_draft_choice(card_codes, self.current_hero or 'unknown')
@@ -4281,8 +4375,9 @@ System Uptime: {system_health['system_uptime_hours']:.1f} hours"""
                     'reasoning': choice.reasoning,
                     'card_details': [vars(c) for c in choice.cards]
                 }
+                logs.append("⚠️ Using legacy AI advisor (AI v2 unavailable)")
             except Exception as e:
-                logs.append(f"⚠️ AI recommendation failed: {e}")
+                logs.append(f"⚠️ Legacy AI recommendation failed: {e}")
 
         # Visual debugging if enabled
         if is_debug_enabled() and card_regions:
@@ -4324,6 +4419,7 @@ System Uptime: {system_health['system_uptime_hours']:.1f} hours"""
             'success': len(detected_cards) > 0,
             'detected_cards': detected_cards,
             'recommendation': recommendation,
+            'ai_decision': ai_decision,  # Include AI v2 decision object
             'logs': logs
         }
     
@@ -4383,6 +4479,7 @@ System Uptime: {system_health['system_uptime_hours']:.1f} hours"""
         """Enhanced analysis result display with hero context and AI v2 integration."""
         detected_cards = result['detected_cards']
         recommendation = result['recommendation']
+        ai_decision = result.get('ai_decision')  # Get AI v2 decision object if available
         
         # Sort detected cards by x-coordinate to ensure correct UI positioning (left to right)
         detected_cards_sorted = sorted(detected_cards, key=lambda c: c['region'][0] if 'region' in c else 0)
@@ -4410,9 +4507,9 @@ System Uptime: {system_health['system_uptime_hours']:.1f} hours"""
             if quality_issues:
                 self.log_text(f"      ⚠️ Issues: {', '.join(quality_issues[:3])}")  # Show first 3 issues
         
-        # Enhanced recommendation display with hero context
+        # Enhanced recommendation display with hero context and AI v2 data
         if recommendation:
-            self._show_enhanced_recommendation(recommendation, detected_cards_sorted)
+            self._show_enhanced_recommendation(recommendation, detected_cards_sorted, ai_decision)
         else:
             # Try AI v2 recommendation if legacy system failed
             if self.current_draft_phase == "card_picks" and self.selected_hero_class:
@@ -4420,7 +4517,7 @@ System Uptime: {system_health['system_uptime_hours']:.1f} hours"""
             else:
                 self.show_recommendation("Cards Detected", f"Found {len(detected_cards)} cards but no AI recommendation available.")
     
-    def _show_enhanced_recommendation(self, recommendation, detected_cards):
+    def _show_enhanced_recommendation(self, recommendation, detected_cards, ai_decision=None):
         """Show enhanced recommendation with hero context and AI v2 integration."""
         try:
             rec_card_name = self.get_card_name(recommendation['recommended_card'])
@@ -4428,10 +4525,17 @@ System Uptime: {system_health['system_uptime_hours']:.1f} hours"""
             # Enhanced title with hero context
             hero_context = f" for {self.selected_hero_class}" if self.selected_hero_class else ""
             pick_context = f" (Pick #{self.draft_picks_count + 1})" if hasattr(self, 'draft_picks_count') else ""
+            ai_system = "AI v2" if ai_decision else "Legacy AI"
             
-            rec_text = f"🎯 AI v2 RECOMMENDATION{hero_context}{pick_context}\n"
+            rec_text = f"🎯 {ai_system} RECOMMENDATION{hero_context}{pick_context}\n"
             rec_text += f"👑 PICK: {rec_card_name}\n\n"
             rec_text += f"📊 Position: #{recommendation['recommended_pick']}\n"
+            
+            # Add AI v2 specific data if available
+            if ai_decision:
+                rec_text += f"🎯 Confidence: {recommendation.get('confidence', 0.0):.1%}\n"
+                if hasattr(ai_decision, 'greed_meter'):
+                    rec_text += f"⚖️ Greed Meter: {ai_decision.greed_meter:.1f}/10\n"
             
             # Add hero synergy context if available
             if self.selected_hero_class:
@@ -4441,20 +4545,36 @@ System Uptime: {system_health['system_uptime_hours']:.1f} hours"""
             rec_text += f"\n💭 Reasoning: {recommendation['reasoning']}\n\n"
             rec_text += "📋 All Options:\n"
             
-            for i, card_detail in enumerate(recommendation['card_details']):
-                card_name = self.get_card_name(card_detail['card_code'])
-                marker = "👑" if i == recommendation['recommended_pick'] - 1 else "📋"
-                
-                # Enhanced card details with tier and winrate
-                tier = card_detail.get('tier_letter', 'N/A')
-                winrate = card_detail.get('win_rate', 0.0)
-                rec_text += f"{marker} {i+1}. {card_name} (Tier {tier}, {winrate:.0%} WR)\n"
-                
-                # Enhanced hero synergy analysis
-                if self.selected_hero_class:
-                    synergy_analysis = self._analyze_hero_card_synergy(card_detail['card_code'], self.selected_hero_class)
-                    if synergy_analysis:
-                        rec_text += f"     {synergy_analysis}\n"
+            # Use AI v2 detailed analysis if available, otherwise fall back to legacy
+            card_analyses = recommendation['card_details']
+            if ai_decision and hasattr(ai_decision, 'all_offered_cards_analysis'):
+                card_analyses = ai_decision.all_offered_cards_analysis
+            
+            for i, card_detail in enumerate(card_analyses):
+                if isinstance(card_detail, dict):
+                    card_id = card_detail.get('card_id', card_detail.get('card_code', 'Unknown'))
+                    card_name = self.get_card_name(card_id)
+                    marker = "👑" if i == recommendation['recommended_pick'] - 1 else "📋"
+                    
+                    # Enhanced card details with AI v2 data if available
+                    if ai_decision and 'dimensional_analysis' in card_detail:
+                        dim_scores = card_detail['dimensional_analysis']
+                        power = dim_scores.get('power', 0.0)
+                        tempo = dim_scores.get('tempo', 0.0)
+                        value = dim_scores.get('value', 0.0)
+                        rec_text += f"{marker} {i+1}. {card_name}\n"
+                        rec_text += f"     📊 Power: {power:.1f} | Tempo: {tempo:.1f} | Value: {value:.1f}\n"
+                    else:
+                        # Legacy format
+                        tier = card_detail.get('tier_letter', 'N/A')
+                        winrate = card_detail.get('win_rate', 0.0)
+                        rec_text += f"{marker} {i+1}. {card_name} (Tier {tier}, {winrate:.0%} WR)\n"
+                    
+                    # Enhanced hero synergy analysis
+                    if self.selected_hero_class:
+                        synergy_analysis = self._analyze_hero_card_synergy(card_id, self.selected_hero_class)
+                        if synergy_analysis:
+                            rec_text += f"     {synergy_analysis}\n"
             
             # Show AI v2 confidence if available
             if hasattr(self, 'hero_recommendation') and self.hero_recommendation:

@@ -53,8 +53,8 @@ class HearthstoneLogMonitor:
     Uses Arena Tracker's proven methodology for maximum accuracy.
     """
     
-    def __init__(self, logs_base_path: str = "/mnt/m/Hearthstone/Logs"):
-        """Initialize the log monitor."""
+    def __init__(self, logs_base_path: str = "/mnt/m/Hearthstone/Logs", event_queue=None):
+        """Initialize the log monitor with optional event queue for automation."""
         self.logs_base_path = Path(logs_base_path)
         self.current_log_dir: Optional[Path] = None
         self.log_files: Dict[str, Path] = {}
@@ -68,7 +68,10 @@ class HearthstoneLogMonitor:
         self.current_hero_choices: List[str] = []  # NEW: Available hero choices
         self.draft_phase = "waiting"  # NEW: Track draft phase (hero_selection, card_picks)
         
-        # Callbacks
+        # Event queue for automation (thread-safe communication)
+        self.event_queue = event_queue
+        
+        # Legacy callbacks (maintained for backward compatibility)
         self.on_game_state_change = None
         self.on_draft_pick = None
         self.on_draft_start = None
@@ -94,6 +97,14 @@ class HearthstoneLogMonitor:
         
         print("🎯 Hearthstone Log Monitor Initialized")
         print(f"📁 Monitoring: {self.logs_base_path}")
+    
+    def _queue_event(self, event_data: dict):
+        """Queue an event for GUI automation (thread-safe)."""
+        if self.event_queue:
+            try:
+                self.event_queue.put(event_data)
+            except Exception as e:
+                print(f"⚠️ Error queuing event: {e}")
     
     def find_latest_log_directory(self) -> Optional[Path]:
         """
@@ -323,22 +334,34 @@ class HearthstoneLogMonitor:
                     print(f"🎯 Hero options: {', '.join(hero_classes)}")
                     
                     # Trigger callback for AI v2 hero selection
+                    event_data = {
+                        'type': 'HERO_CHOICES_READY',
+                        'hero_card_ids': hero_ids,
+                        'hero_classes': hero_classes,
+                        'timestamp': entry.timestamp
+                    }
+                    
+                    # Queue event for automation
+                    self._queue_event(event_data)
+                    
+                    # Legacy callback for backward compatibility
                     if self.on_hero_choices_ready:
-                        self.on_hero_choices_ready({
-                            'event': 'HERO_CHOICES_READY',
-                            'hero_card_ids': hero_ids,
-                            'hero_classes': hero_classes,
-                            'timestamp': entry.timestamp
-                        })
+                        self.on_hero_choices_ready(event_data)
                 else:
                     # Fallback - just notify that hero choices are available
+                    event_data = {
+                        'type': 'HERO_CHOICES_READY',
+                        'hero_card_ids': [],
+                        'hero_classes': [],
+                        'timestamp': entry.timestamp
+                    }
+                    
+                    # Queue event for automation
+                    self._queue_event(event_data)
+                    
+                    # Legacy callback for backward compatibility
                     if self.on_hero_choices_ready:
-                        self.on_hero_choices_ready({
-                            'event': 'HERO_CHOICES_READY',
-                            'hero_card_ids': [],
-                            'hero_classes': [],
-                            'timestamp': entry.timestamp
-                        })
+                        self.on_hero_choices_ready(event_data)
             
             # Hero selection (when choice is made)
             hero_match = self.patterns['draft_hero'].search(message)
@@ -363,12 +386,18 @@ class HearthstoneLogMonitor:
                     
                 # NEW: Trigger automatic screenshot analysis when card choices appear
                 print(f"🤖 Card choices detected - triggering automatic analysis")
+                event_data = {
+                    'type': 'CARD_CHOICES_READY',
+                    'draft_phase': self.draft_phase,
+                    'timestamp': entry.timestamp if 'entry' in locals() else None
+                }
+                
+                # Queue event for automation
+                self._queue_event(event_data)
+                
+                # Legacy callback for backward compatibility
                 if self.on_card_choices_ready:
-                    self.on_card_choices_ready({
-                        'event': 'CARD_CHOICES_READY',
-                        'draft_phase': self.draft_phase,
-                        'timestamp': entry.timestamp if 'entry' in locals() else None
-                    })
+                    self.on_card_choices_ready(event_data)
             
             # Current deck contents (for mid-draft analysis)
             deck_card_match = self.patterns['draft_deck_card'].search(message)

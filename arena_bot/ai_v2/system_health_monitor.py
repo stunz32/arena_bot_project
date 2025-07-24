@@ -469,11 +469,11 @@ class SystemHealthMonitor:
         
         try:
             # Run health checks for all registered components
-            for component in self.component_checkers:
+            for component in list(self.component_checkers.keys()):
                 self._run_component_health_check(component)
             
             # Update system metrics
-            self._update_system_metrics()
+            self._get_system_metrics()
             
             # Check performance trends
             self._analyze_performance_trends()
