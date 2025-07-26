@@ -203,24 +203,31 @@ class HeroSelectionAdvisor:
         }
     
     def _get_current_winrates(self, force_refresh: bool = False) -> Dict[str, float]:
-        """Get current hero winrates with caching."""
+        """Get current hero winrates with caching and enhanced reliability."""
         try:
             # Check if we need to refresh data
             if force_refresh or not self.hero_winrates or self._should_refresh_winrates():
                 self.logger.debug("Fetching fresh hero winrates from HSReplay")
-                fresh_winrates = self.hsreplay_scraper.get_hero_winrates(force_refresh=force_refresh)
+                
+                # Validate HSReplay connection before attempting data fetch
+                if not self._validate_hsreplay_connection():
+                    self.logger.warning("HSReplay connection validation failed, using cached/fallback data")
+                    return self.hero_winrates if self.hero_winrates else self._get_fallback_winrates()
+                
+                # Fetch winrates with retry logic
+                fresh_winrates = self._fetch_winrates_with_retry(force_refresh=force_refresh)
                 
                 if fresh_winrates:
                     self.hero_winrates = fresh_winrates
                     self.last_winrate_fetch = datetime.now()
-                    self.logger.info(f"Updated hero winrates: {len(fresh_winrates)} classes")
+                    self.logger.info(f"✅ Updated hero winrates: {len(fresh_winrates)} classes")
                 else:
-                    self.logger.warning("Failed to fetch fresh winrates, using cached/fallback data")
+                    self.logger.warning("❌ Failed to fetch fresh winrates, using cached/fallback data")
             
-            return self.hero_winrates
+            return self.hero_winrates if self.hero_winrates else self._get_fallback_winrates()
             
         except Exception as e:
-            self.logger.error(f"Error getting hero winrates: {e}")
+            self.logger.error(f"❌ Error getting hero winrates: {e}")
             return self._get_fallback_winrates()
     
     def _should_refresh_winrates(self) -> bool:
@@ -832,3 +839,70 @@ class HeroSelectionAdvisor:
             self.user_preferences[user_id]['complexity_performance'][complexity] = []
         
         self.user_preferences[user_id]['complexity_performance'][complexity].append(winrate)
+    
+    # === HSReplay RELIABILITY METHODS ===
+    
+    def _validate_hsreplay_connection(self) -> bool:
+        """Validate HSReplay connection before making API calls."""
+        try:
+            if not self.hsreplay_scraper:
+                self.logger.warning("HSReplay scraper not initialized")
+                return False
+            
+            # Check if scraper has basic connectivity
+            if hasattr(self.hsreplay_scraper, 'get_api_status'):
+                status = self.hsreplay_scraper.get_api_status()
+                if not status.get('available', False):
+                    self.logger.warning(f"HSReplay API not available: {status}")
+                    return False
+            
+            return True
+            
+        except Exception as e:
+            self.logger.warning(f"HSReplay connection validation failed: {e}")
+            return False
+    
+    def _fetch_winrates_with_retry(self, force_refresh: bool = False, max_retries: int = 3) -> Optional[Dict[str, float]]:
+        """Fetch hero winrates with retry logic and timeout protection."""
+        import threading
+        import time
+        
+        def fetch_with_timeout():
+            try:
+                return self.hsreplay_scraper.get_hero_winrates(force_refresh=force_refresh)
+            except Exception as e:
+                self.logger.warning(f"HSReplay winrates fetch error: {e}")
+                return None
+        
+        for attempt in range(max_retries):
+            try:
+                self.logger.debug(f"HSReplay winrates fetch attempt {attempt + 1}/{max_retries}")
+                
+                # Use threading for timeout protection
+                result = [None]
+                thread = threading.Thread(target=lambda: result.__setitem__(0, fetch_with_timeout()))
+                thread.daemon = True
+                thread.start()
+                thread.join(timeout=8.0)  # 8 second timeout
+                
+                if thread.is_alive():
+                    self.logger.warning(f"HSReplay winrates fetch timeout on attempt {attempt + 1}")
+                    continue
+                
+                if result[0]:
+                    self.logger.info(f"✅ HSReplay winrates fetched successfully on attempt {attempt + 1}")
+                    return result[0]
+                else:
+                    self.logger.warning(f"❌ HSReplay winrates fetch returned empty on attempt {attempt + 1}")
+                
+                # Wait before retry
+                if attempt < max_retries - 1:
+                    time.sleep(1.0 * (attempt + 1))  # Progressive backoff
+                    
+            except Exception as e:
+                self.logger.warning(f"HSReplay winrates fetch exception on attempt {attempt + 1}: {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(1.0 * (attempt + 1))
+        
+        self.logger.error("❌ All HSReplay winrates fetch attempts failed, using fallback")
+        return None

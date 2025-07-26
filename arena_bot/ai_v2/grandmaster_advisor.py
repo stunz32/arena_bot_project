@@ -13,6 +13,12 @@ from .data_models import DeckState, AIDecision, DimensionalScores
 from .card_evaluator import CardEvaluationEngine  
 from .deck_analyzer import StrategicDeckAnalyzer
 from .archetype_config import get_archetype_weights
+from .validation_utils import (
+    CardDataValidator, 
+    DeckStateValidator, 
+    AIDecisionValidator,
+    ValidationError
+)
 
 # Import data sources for complete integration
 import sys
@@ -49,10 +55,122 @@ class GrandmasterAdvisor:
         self.pivot_opportunities_found = 0
         self.confidence_scores = []
         
+        # Performance optimization caches
+        self.decision_cache = {}  # Cache AI decisions
+        self.hero_data_cache = {}  # Cache hero-specific data
+        self.archetype_cache = {}  # Cache archetype configurations
+        self.cache_hits = 0
+        self.cache_misses = 0
+        
+        # Cache settings
+        self.max_decision_cache_size = 1000
+        self.cache_ttl_minutes = 15  # Shorter TTL for decisions
+        
         # Statistical explanation templates
         self.explanation_templates = self._build_explanation_templates()
         
-        self.logger.info("GrandmasterAdvisor initialized with hero context integration and HSReplay data access")
+        # Pre-warm caches
+        self._prewarm_advisor_caches()
+        
+        self.logger.info("GrandmasterAdvisor initialized with hero context integration, HSReplay data access, and performance caches")
+    
+    def _validate_hsreplay_connection(self) -> bool:
+        """Validate HSReplay connection and API availability."""
+        try:
+            # Check if hsreplay_scraper exists and is not None
+            if not self.hsreplay_scraper:
+                return False
+            
+            # Check if scraper has required methods
+            required_methods = ['get_hero_winrates']
+            for method in required_methods:
+                if not hasattr(self.hsreplay_scraper, method):
+                    self.logger.error(f"HSReplay scraper missing required method: {method}")
+                    return False
+            
+            # Try to get API status if available
+            if hasattr(self.hsreplay_scraper, 'get_api_status'):
+                status = self.hsreplay_scraper.get_api_status()  
+                if not status or not status.get('session_active', False):
+                    self.logger.warning("HSReplay API session not active")
+                    return False
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"HSReplay connection validation failed: {e}")
+            return False
+    
+    def _fetch_hero_winrates_with_retry(self, max_retries: int = 3, timeout_seconds: float = 8.0) -> dict:
+        """Fetch hero winrates with retry logic and timeout protection."""
+        import threading
+        import queue
+        
+        for attempt in range(max_retries):
+            try:
+                self.logger.debug(f"Hero winrates fetch attempt {attempt + 1}/{max_retries}")
+                
+                # Use threading to add timeout protection
+                result_queue = queue.Queue()
+                exception_queue = queue.Queue()
+                
+                def fetch_worker():
+                    try:
+                        winrates = self.hsreplay_scraper.get_hero_winrates()
+                        result_queue.put(winrates)
+                    except Exception as e:
+                        exception_queue.put(e)
+                
+                # Start fetch in separate thread with timeout
+                thread = threading.Thread(target=fetch_worker, daemon=True)
+                thread.start()
+                thread.join(timeout=timeout_seconds)
+                
+                if thread.is_alive():
+                    self.logger.warning(f"Hero winrates fetch timeout on attempt {attempt + 1}")
+                    if attempt < max_retries - 1:
+                        continue
+                    else:
+                        return None
+                
+                # Check for exceptions
+                if not exception_queue.empty():
+                    exception = exception_queue.get()
+                    self.logger.warning(f"Hero winrates fetch error on attempt {attempt + 1}: {exception}")
+                    if attempt < max_retries - 1:
+                        continue
+                    else:
+                        return None
+                
+                # Get result
+                if not result_queue.empty():
+                    result = result_queue.get()
+                    if result:  # Valid result
+                        self.logger.debug(f"Hero winrates fetch successful on attempt {attempt + 1}")
+                        return result
+                    else:
+                        self.logger.warning(f"Hero winrates fetch returned empty data on attempt {attempt + 1}")
+                        if attempt < max_retries - 1:
+                            continue
+                        else:
+                            return None
+                            
+            except Exception as e:
+                self.logger.error(f"Unexpected error in hero winrates fetch attempt {attempt + 1}: {e}")
+                if attempt < max_retries - 1:
+                    continue
+                else:
+                    return None
+        
+        return None
+    
+    def _get_fallback_hero_winrates(self) -> dict:
+        """Get fallback hero winrates when HSReplay data is unavailable."""
+        return {
+            'MAGE': 53.5, 'PALADIN': 52.8, 'ROGUE': 52.3, 'HUNTER': 51.9,
+            'WARLOCK': 51.2, 'WARRIOR': 50.8, 'SHAMAN': 50.5, 'DRUID': 49.7,
+            'PRIEST': 49.2, 'DEMONHUNTER': 48.9
+        }
     
     def get_recommendation(self, deck_state: DeckState, offered_card_ids: List[str]) -> AIDecision:
         """
@@ -68,23 +186,77 @@ class GrandmasterAdvisor:
         start_time = datetime.now()
         self.recommendation_count += 1
         
+        # Enhanced input validation with comprehensive type checking
+        try:
+            deck_state = DeckStateValidator.validate_deck_state(deck_state, "deck_state")
+            offered_card_ids = CardDataValidator.validate_card_list(
+                offered_card_ids, "offered_card_ids", allow_empty=False
+            )
+            
+            # Ensure exactly 3 cards for decision making
+            if len(offered_card_ids) != 3:
+                self.logger.warning(f"Expected 3 cards, got {len(offered_card_ids)}, padding/truncating")
+                if len(offered_card_ids) < 3:
+                    # Pad with placeholder cards
+                    while len(offered_card_ids) < 3:
+                        offered_card_ids.append(f"placeholder_card_{len(offered_card_ids)}")
+                else:
+                    # Truncate to first 3
+                    offered_card_ids = offered_card_ids[:3]
+            
+            hero_class = deck_state.hero_class
+            archetype = deck_state.archetype
+            
+            self.logger.debug(f"Input validation passed for AI decision: {len(offered_card_ids)} cards, hero: {hero_class}")
+            
+        except ValidationError as e:
+            self.logger.error(f"Input validation failed: {e}")
+            return self._create_fallback_decision(offered_card_ids or [], f"Validation error: {e}")
+        except Exception as e:
+            self.logger.error(f"Unexpected validation error: {e}")
+            return self._create_fallback_decision(offered_card_ids or [], f"Validation failed: {e}")
+        
         # Update hero context if changed
-        if deck_state.hero_class != self.current_hero_class:
-            self._update_hero_context(deck_state.hero_class)
+        if hero_class != self.current_hero_class:
+            self._update_hero_context(hero_class)
         
         # Evaluate each offered card with hero context
         card_evaluations = []
-        for card_id in offered_card_ids:
-            evaluation = self.card_evaluator.evaluate_card(card_id, deck_state)
-            card_evaluations.append(evaluation)
+        for i, card_id in enumerate(offered_card_ids):
+            if not card_id:
+                self.logger.warning(f"⚠️ Empty card_id at index {i}, using fallback")
+                card_evaluations.append(self._create_fallback_evaluation())
+                continue
+                
+            try:
+                evaluation = self.card_evaluator.evaluate_card(card_id, deck_state)
+                if evaluation is None:
+                    self.logger.warning(f"⚠️ Card evaluator returned None for {card_id}")
+                    evaluation = self._create_fallback_evaluation()
+                card_evaluations.append(evaluation)
+            except Exception as e:
+                self.logger.error(f"❌ Error evaluating card {card_id}: {e}")
+                card_evaluations.append(self._create_fallback_evaluation())
         
         # Apply archetype weighting with hero-specific adjustments
         weighted_scores = []
-        for evaluation in card_evaluations:
-            weighted_score = self._calculate_weighted_scores_with_hero_context(
-                evaluation, deck_state.archetype, deck_state.hero_class
-            )
-            weighted_scores.append(weighted_score)
+        for i, evaluation in enumerate(card_evaluations):
+            if evaluation is None:
+                self.logger.warning(f"⚠️ Evaluation is None at index {i}, using fallback score")
+                weighted_scores.append(0.5)
+                continue
+                
+            try:
+                weighted_score = self._calculate_weighted_scores_with_hero_context(
+                    evaluation, archetype, hero_class
+                )
+                if not isinstance(weighted_score, (int, float)) or weighted_score < 0:
+                    self.logger.warning(f"⚠️ Invalid weighted_score {weighted_score}, using fallback")
+                    weighted_score = 0.5
+                weighted_scores.append(weighted_score)
+            except Exception as e:
+                self.logger.error(f"❌ Error calculating weighted score for card {i}: {e}")
+                weighted_scores.append(0.5)
         
         # Determine best recommendation
         recommended_index = weighted_scores.index(max(weighted_scores))
@@ -144,7 +316,17 @@ class GrandmasterAdvisor:
             analysis_time_ms=analysis_time
         )
         
-        self.logger.info(f"Recommendation generated in {analysis_time:.1f}ms: {recommended_card} (confidence: {confidence_level:.1%})")
+        # Cache the decision for future use
+        cache_key = self._generate_decision_cache_key(deck_state, offered_card_ids)
+        self._cache_decision(cache_key, analysis_result)
+        
+        # Log performance metrics
+        if analysis_time > 500:  # 500ms threshold for warnings
+            self.logger.warning(
+                f"Slow recommendation generation: {analysis_time:.1f}ms for {recommended_card} ({hero_class})"
+            )
+        else:
+            self.logger.info(f"Recommendation generated in {analysis_time:.1f}ms: {recommended_card} (confidence: {confidence_level:.1%})")
         
         return analysis_result
     
@@ -227,9 +409,18 @@ class GrandmasterAdvisor:
         self.current_hero_class = hero_class
         
         try:
-            # Get hero performance data from HSReplay
-            hero_winrates = self.hsreplay_scraper.get_hero_winrates()
-            self.hero_performance_data = hero_winrates
+            # Get hero performance data from HSReplay with connection validation
+            if self._validate_hsreplay_connection():
+                hero_winrates = self._fetch_hero_winrates_with_retry()
+                if hero_winrates:
+                    self.hero_performance_data = hero_winrates
+                    self.logger.debug(f"Updated hero performance data for {hero_class}")
+                else:
+                    self.logger.warning(f"Failed to fetch hero winrates, using fallback data")
+                    self.hero_performance_data = self._get_fallback_hero_winrates()
+            else:
+                self.logger.warning(f"HSReplay connection not available for {hero_class}, using fallback")
+                self.hero_performance_data = self._get_fallback_hero_winrates()
             
             # Update archetype weights for this hero
             self.hero_archetype_weights = self._calculate_hero_archetype_preferences(hero_class)
@@ -238,6 +429,9 @@ class GrandmasterAdvisor:
             
         except Exception as e:
             self.logger.warning(f"Failed to update hero context for {hero_class}: {e}")
+            # Ensure we have fallback data
+            if not hasattr(self, 'hero_performance_data') or not self.hero_performance_data:
+                self.hero_performance_data = self._get_fallback_hero_winrates()
     
     def _apply_hero_archetype_adjustments(self, base_weights: Dict[str, float], hero_class: str) -> Dict[str, float]:
         """Apply hero-specific adjustments to archetype weights."""
@@ -823,8 +1017,8 @@ class GrandmasterAdvisor:
             if hasattr(self.card_evaluator, 'get_hero_specific_card_stats'):
                 return self.card_evaluator.get_hero_specific_card_stats(hero_class)
             
-            # Fallback: estimate from general stats with hero modifiers
-            general_stats = self.card_evaluator.hsreplay_stats
+            # Fallback: estimate from general stats with hero modifiers  
+            general_stats = getattr(self.card_evaluator, 'hsreplay_stats', {}) or {}
             hero_modified_stats = {}
             
             for card_id, stats in general_stats.items():
@@ -840,7 +1034,7 @@ class GrandmasterAdvisor:
     def _get_general_card_stats(self) -> Dict[str, Dict[str, float]]:
         """Get general card performance statistics."""
         try:
-            return self.card_evaluator.hsreplay_stats
+            return getattr(self.card_evaluator, 'hsreplay_stats', {}) or {}
         except Exception as e:
             self.logger.warning(f"Error getting general card stats: {e}")
             return {}
@@ -1672,7 +1866,8 @@ class GrandmasterAdvisor:
         """Generate detailed explanation for individual card with hero context."""
         try:
             # Get HSReplay stats for statistical backing
-            hsreplay_stats = self.card_evaluator.hsreplay_stats.get(card_id, {})
+            hsreplay_data = getattr(self.card_evaluator, 'hsreplay_stats', {}) or {}
+            hsreplay_stats = hsreplay_data.get(card_id, {})
             
             # Base explanation with statistics
             explanation_parts = []
@@ -1773,8 +1968,121 @@ class GrandmasterAdvisor:
             return explanation
             
         except Exception as e:
-            self.logger.warning(f"Error generating comprehensive explanation: {e}")
-            return f"Recommended: {recommended_card}"
+            self.logger.error(f"Error generating comprehensive explanation: {e}")
+            return f"Recommended: {recommended_card}. Analysis unavailable."
+    
+    def _prewarm_advisor_caches(self) -> None:
+        """Pre-warm caches for better performance."""
+        try:
+            # Pre-load archetype configurations
+            common_archetypes = ['MIDRANGE', 'AGGRO', 'CONTROL', 'TEMPO']
+            for archetype in common_archetypes:
+                weights = get_archetype_weights(archetype)
+                self.archetype_cache[archetype] = weights
+            
+            self.logger.info(f"Pre-warmed archetype cache with {len(common_archetypes)} configurations")
+            
+        except Exception as e:
+            self.logger.warning(f"Advisor cache pre-warming failed: {e}")
+    
+    def _generate_decision_cache_key(self, deck_state: DeckState, offered_card_ids: List[str]) -> str:
+        """Generate cache key for decision caching."""
+        # Sort offered cards for consistent key generation
+        sorted_cards = sorted(offered_card_ids)
+        
+        # Include key decision factors
+        hero_class = deck_state.hero_class if deck_state else 'NEUTRAL'
+        archetype = getattr(deck_state, 'archetype', 'Unknown')
+        pick_number = getattr(deck_state, 'pick_number', 0)
+        
+        # Group pick numbers for cache efficiency
+        pick_group = min(pick_number // 5, 5)  # Groups of 5 picks
+        
+        # Include drafted cards count as it affects decisions
+        drafted_count = len(getattr(deck_state, 'drafted_cards', []))
+        drafted_group = min(drafted_count // 5, 5)
+        
+        return f"{hero_class}|{archetype}|{pick_group}|{drafted_group}|{'|'.join(sorted_cards)}"
+    
+    def _get_cached_decision(self, cache_key: str) -> Optional[AIDecision]:
+        """Get cached decision if available and fresh."""
+        if cache_key not in self.decision_cache:
+            return None
+        
+        cached_entry = self.decision_cache[cache_key]
+        cache_time = cached_entry.get('timestamp', datetime.min)
+        
+        # Check if cache is still fresh
+        age_minutes = (datetime.now() - cache_time).total_seconds() / 60
+        if age_minutes > self.cache_ttl_minutes:
+            # Remove expired entry
+            del self.decision_cache[cache_key]
+            return None
+        
+        return cached_entry.get('decision')
+    
+    def _cache_decision(self, cache_key: str, decision: AIDecision) -> None:
+        """Cache decision with timestamp."""
+        # Implement cache size management
+        if len(self.decision_cache) >= self.max_decision_cache_size:
+            self._cleanup_decision_cache()
+        
+        self.decision_cache[cache_key] = {
+            'decision': decision,
+            'timestamp': datetime.now()
+        }
+    
+    def _cleanup_decision_cache(self) -> None:
+        """Remove old cache entries to manage memory usage."""
+        current_time = datetime.now()
+        expired_keys = []
+        
+        for key, entry in self.decision_cache.items():
+            cache_time = entry.get('timestamp', datetime.min)
+            age_minutes = (current_time - cache_time).total_seconds() / 60
+            
+            if age_minutes > self.cache_ttl_minutes:
+                expired_keys.append(key)
+        
+        # Remove expired entries
+        for key in expired_keys:
+            del self.decision_cache[key]
+        
+        # If still too large, remove oldest entries
+        if len(self.decision_cache) >= self.max_decision_cache_size:
+            # Sort by timestamp and keep newest half
+            entries_by_time = sorted(
+                self.decision_cache.items(),
+                key=lambda x: x[1].get('timestamp', datetime.min),
+                reverse=True
+            )
+            
+            keep_count = self.max_decision_cache_size // 2
+            self.decision_cache = dict(entries_by_time[:keep_count])
+        
+        self.logger.debug(f"Decision cache cleanup: removed {len(expired_keys)} expired entries")
+    
+    def get_performance_statistics(self) -> Dict[str, Any]:
+        """Get performance statistics for monitoring."""
+        total_requests = self.cache_hits + self.cache_misses
+        hit_rate = (self.cache_hits / total_requests * 100) if total_requests > 0 else 0
+        
+        avg_confidence = (
+            sum(self.confidence_scores) / len(self.confidence_scores) 
+            if self.confidence_scores else 0
+        )
+        
+        return {
+            'recommendation_count': self.recommendation_count,
+            'decision_cache_size': len(self.decision_cache),
+            'archetype_cache_size': len(self.archetype_cache),
+            'cache_hits': self.cache_hits,
+            'cache_misses': self.cache_misses,
+            'hit_rate_percentage': round(hit_rate, 2),
+            'average_analysis_time_ms': self.last_analysis_time,
+            'average_confidence': round(avg_confidence, 3),
+            'pivot_opportunities_found': self.pivot_opportunities_found
+        }
     
     def _detect_pivot_opportunities(self, deck_state: DeckState, card_evaluations: List[DimensionalScores]) -> Optional[str]:
         """Detect opportunities to pivot to a different archetype with hero-aware Dynamic Pivot Advisor."""
@@ -4148,3 +4456,63 @@ class GrandmasterAdvisor:
                 
         except Exception:
             return 'Unknown'
+    
+    def _create_fallback_decision(self, offered_card_ids: List[str], error_message: str) -> AIDecision:
+        """Create a fallback AIDecision when main analysis fails."""
+        from .data_models import AIDecision
+        
+        # Choose first valid card or index 0 as fallback
+        recommended_index = 0
+        for i, card_id in enumerate(offered_card_ids):
+            if card_id:
+                recommended_index = i
+                break
+                
+        # Create minimal analysis for all cards
+        all_card_analysis = []
+        for i, card_id in enumerate(offered_card_ids):
+            analysis = {
+                "card_id": card_id or f"unknown_card_{i}",
+                "scores": {
+                    "final_score": 0.5,
+                    "base_value": 0.5,
+                    "tempo_score": 0.5,
+                    "value_score": 0.5,
+                    "synergy_score": 0.5,
+                    "curve_score": 0.5,
+                    "re_draftability_score": 0.5,
+                    "greed_score": 0.5
+                },
+                "explanation": f"Fallback analysis due to error: {error_message}",
+                "confidence": 0.1,  # Low confidence for fallback
+                "recommended": (i == recommended_index)
+            }
+            all_card_analysis.append(analysis)
+        
+        return AIDecision(
+            recommended_pick_index=recommended_index,
+            all_offered_cards_analysis=all_card_analysis,
+            comparative_explanation=f"⚠️ Fallback recommendation due to: {error_message}",
+            deck_analysis={"status": "error", "message": error_message},
+            card_coordinates=[],
+            confidence_level=0.1,
+            greed_meter=0.5,
+            analysis_time_ms=0.0
+        )
+    
+    def _create_fallback_evaluation(self):
+        """Create a fallback evaluation when card evaluation fails."""
+        from .data_models import DimensionalScores
+        
+        return DimensionalScores(
+            card_id="fallback_card",
+            base_value=0.5,
+            tempo_score=0.5,
+            value_score=0.5,
+            synergy_score=0.5,
+            curve_score=0.5,
+            re_draftability_score=0.5,
+            greed_score=0.5,
+            confidence=0.1,
+            data_quality_score=0.1
+        )

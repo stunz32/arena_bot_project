@@ -11,6 +11,7 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime
 from .data_models import DimensionalScores, DeckState
 from .archetype_config import get_archetype_weights
+from .validation_utils import CardDataValidator, DeckStateValidator, ValidationError
 
 # Import data sources
 import sys
@@ -41,15 +42,29 @@ class CardEvaluationEngine:
         self.hero_winrates = {}   # Hero performance cache
         self.last_stats_fetch = None
         
+        # Performance optimization caches
+        self.card_data_cache = {}  # Cached card data for fast lookup
+        self.evaluation_cache = {}  # Cached evaluations by card+hero+archetype
+        self.text_analysis_cache = {}  # Pre-analyzed card text features
+        self.hero_modifier_cache = {}  # Cached hero-specific modifiers
+        
         # Performance tracking
         self.evaluation_count = 0
         self.cache_hits = 0
+        self.cache_miss_count = 0
+        
+        # Cache management settings
+        self.max_cache_size = 10000
+        self.cache_ttl_minutes = 30
         
         # Tribal/keyword synergy definitions
         self.tribal_synergies = self._build_tribal_synergies()
         self.keyword_synergies = self._build_keyword_synergies()
         
-        self.logger.info("CardEvaluationEngine initialized with HSReplay integration")
+        # Pre-warm caches for better performance
+        self._prewarm_caches()
+        
+        self.logger.info("CardEvaluationEngine initialized with HSReplay integration and performance caches")
     
     def evaluate_card(self, card_id: str, deck_state: DeckState) -> DimensionalScores:
         """
@@ -65,23 +80,119 @@ class CardEvaluationEngine:
         start_time = datetime.now()
         self.evaluation_count += 1
         
-        # Ensure fresh HSReplay data
-        self._ensure_fresh_data()
+        # Enhanced input validation with comprehensive type checking
+        try:
+            card_id = CardDataValidator.validate_card_id(card_id, "card_id")
+            deck_state = DeckStateValidator.validate_deck_state(deck_state, "deck_state")
+            hero_class = deck_state.hero_class  # Now guaranteed to be valid
+            self.logger.debug(f"Input validation passed for card evaluation: {card_id}, hero: {hero_class}")
+        except ValidationError as e:
+            self.logger.error(f"Input validation failed: {e}")
+            return self._create_fallback_scores(f"Validation error: {e}")
+        except Exception as e:
+            self.logger.error(f"Unexpected validation error: {e}")
+            return self._create_fallback_scores(f"Validation failed: {e}")
         
-        # Calculate each dimension with hero context
-        base_value = self._calculate_base_value(card_id, deck_state.hero_class)
-        tempo_score = self._calculate_tempo_score(card_id, deck_state)
-        value_score = self._calculate_value_score(card_id, deck_state)
-        synergy_score = self._calculate_synergy_score(card_id, deck_state)
-        curve_score = self._calculate_curve_score(card_id, deck_state)
-        re_draftability_score = self._calculate_re_draftability_score(card_id)
+        # Generate cache key for this evaluation
+        cache_key = self._generate_cache_key(card_id, deck_state)
         
-        # Calculate greed score from dimensional variance
-        dimensional_values = [tempo_score, value_score, synergy_score, curve_score]
-        greed_score = self._calculate_greed_score(dimensional_values)
+        # Check cache first
+        cached_result = self._get_cached_evaluation(cache_key)
+        if cached_result:
+            self.cache_hits += 1
+            return cached_result
         
-        # Calculate confidence based on data quality
-        confidence = self._calculate_evaluation_confidence(card_id)
+        self.cache_miss_count += 1
+        
+        # Ensure fresh HSReplay data with graceful degradation
+        try:
+            self._ensure_fresh_data()
+        except Exception as e:
+            self.logger.warning(f"⚠️ HSReplay data unavailable: {e}")
+            # Continue with cached data - don't crash
+            if not hasattr(self, 'hsreplay_stats') or not self.hsreplay_stats:
+                self.hsreplay_stats = {}
+                self.logger.info("Using default values due to HSReplay unavailability")
+        
+        # Calculate each dimension with hero context and defensive programming
+        try:
+            base_value = self._calculate_base_value(card_id, hero_class)
+            if not isinstance(base_value, (int, float)) or base_value < 0:
+                self.logger.warning(f"⚠️ Invalid base_value {base_value} for {card_id}")
+                base_value = 0.5
+        except Exception as e:
+            self.logger.error(f"❌ Error calculating base_value for {card_id}: {e}")
+            base_value = 0.5
+            
+        try:
+            tempo_score = self._calculate_tempo_score(card_id, deck_state)
+            if not isinstance(tempo_score, (int, float)) or tempo_score < 0:
+                self.logger.warning(f"⚠️ Invalid tempo_score {tempo_score} for {card_id}")
+                tempo_score = 0.5
+        except Exception as e:
+            self.logger.error(f"❌ Error calculating tempo_score for {card_id}: {e}")
+            tempo_score = 0.5
+            
+        try:
+            value_score = self._calculate_value_score(card_id, deck_state)
+            if not isinstance(value_score, (int, float)) or value_score < 0:
+                self.logger.warning(f"⚠️ Invalid value_score {value_score} for {card_id}")
+                value_score = 0.5
+        except Exception as e:
+            self.logger.error(f"❌ Error calculating value_score for {card_id}: {e}")
+            value_score = 0.5
+            
+        try:
+            synergy_score = self._calculate_synergy_score(card_id, deck_state)
+            if not isinstance(synergy_score, (int, float)) or synergy_score < 0:
+                self.logger.warning(f"⚠️ Invalid synergy_score {synergy_score} for {card_id}")
+                synergy_score = 0.5
+        except Exception as e:
+            self.logger.error(f"❌ Error calculating synergy_score for {card_id}: {e}")
+            synergy_score = 0.5
+            
+        try:
+            curve_score = self._calculate_curve_score(card_id, deck_state)
+            if not isinstance(curve_score, (int, float)) or curve_score < 0:
+                self.logger.warning(f"⚠️ Invalid curve_score {curve_score} for {card_id}")
+                curve_score = 0.5
+        except Exception as e:
+            self.logger.error(f"❌ Error calculating curve_score for {card_id}: {e}")
+            curve_score = 0.5
+            
+        try:
+            re_draftability_score = self._calculate_re_draftability_score(card_id)
+            if not isinstance(re_draftability_score, (int, float)) or re_draftability_score < 0:
+                self.logger.warning(f"⚠️ Invalid re_draftability_score {re_draftability_score} for {card_id}")
+                re_draftability_score = 0.5
+        except Exception as e:
+            self.logger.error(f"❌ Error calculating re_draftability_score for {card_id}: {e}")
+            re_draftability_score = 0.5
+        
+        # Calculate greed score from dimensional variance with validation
+        try:
+            dimensional_values = [tempo_score, value_score, synergy_score, curve_score]
+            # Filter out invalid values
+            valid_values = [v for v in dimensional_values if isinstance(v, (int, float)) and 0 <= v <= 1]
+            if len(valid_values) < 2:
+                greed_score = 0.5  # Default if not enough valid values
+            else:
+                greed_score = self._calculate_greed_score(valid_values)
+                if not isinstance(greed_score, (int, float)) or greed_score < 0:
+                    greed_score = 0.5
+        except Exception as e:
+            self.logger.error(f"❌ Error calculating greed_score for {card_id}: {e}")
+            greed_score = 0.5
+        
+        # Calculate confidence based on data quality with validation
+        try:
+            confidence = self._calculate_evaluation_confidence(card_id)
+            if not isinstance(confidence, (int, float)) or not (0 <= confidence <= 1):
+                self.logger.warning(f"⚠️ Invalid confidence {confidence} for {card_id}")
+                confidence = 0.5
+        except Exception as e:
+            self.logger.error(f"❌ Error calculating confidence for {card_id}: {e}")
+            confidence = 0.5
         
         result = DimensionalScores(
             card_id=card_id,
@@ -96,7 +207,17 @@ class CardEvaluationEngine:
         )
         
         eval_time = (datetime.now() - start_time).total_seconds() * 1000
-        self.logger.debug(f"Card evaluation completed in {eval_time:.1f}ms: {card_id}")
+        
+        # Cache the result for future use
+        self._cache_evaluation(cache_key, result)
+        
+        # Log performance warning if evaluation is slow
+        if eval_time > 100:  # 100ms threshold
+            self.logger.warning(
+                f"Slow card evaluation: {card_id} took {eval_time:.1f}ms (hero: {hero_class})"
+            )
+        else:
+            self.logger.debug(f"Card evaluation completed in {eval_time:.1f}ms: {card_id}")
         
         return result
     
@@ -141,12 +262,15 @@ class CardEvaluationEngine:
     def _calculate_tempo_score(self, card_id: str, deck_state: DeckState) -> float:
         """Calculate tempo impact score enhanced with hero-specific tempo considerations."""
         try:
-            card_data = self.cards_loader.cards_data.get(card_id, {})
+            # Use cached card data for performance
+            card_data = self._get_cached_card_data(card_id)
             cost = card_data.get('cost', 0)
             attack = card_data.get('attack', 0)
             health = card_data.get('health', 0)
             card_type = card_data.get('type', '')
-            text = card_data.get('text', '').lower()
+            
+            # Use cached text analysis for performance
+            text_features = self._get_cached_text_analysis(card_id)
             
             # Base tempo from stats-to-cost ratio
             if cost > 0 and card_type == 'MINION':
@@ -157,13 +281,13 @@ class CardEvaluationEngine:
             else:
                 tempo_base = 0.0
             
-            # Immediate impact bonuses
+            # Immediate impact bonuses using cached analysis
             immediate_impact = 0.0
-            if 'charge' in text or 'rush' in text:
+            if text_features.get('charge') or text_features.get('rush'):
                 immediate_impact += 0.3
-            if 'battlecry' in text:
+            if text_features.get('battlecry'):
                 immediate_impact += 0.2
-            if 'taunt' in text:
+            if text_features.get('taunt'):
                 immediate_impact += 0.15
             
             # Hero-specific tempo modifiers
@@ -179,36 +303,40 @@ class CardEvaluationEngine:
     def _calculate_value_score(self, card_id: str, deck_state: DeckState) -> float:
         """Calculate long-term value score with hero-specific value preferences."""
         try:
-            card_data = self.cards_loader.cards_data.get(card_id, {})
-            text = card_data.get('text', '').lower()
+            # Use cached card data for performance
+            card_data = self._get_cached_card_data(card_id)
             card_type = card_data.get('type', '')
+            
+            # Use cached text analysis for performance
+            text_features = self._get_cached_text_analysis(card_id)
             
             # Card advantage mechanisms
             value_score = 0.0
             
             # Draw effects
-            if 'draw' in text:
-                draw_count = text.count('draw')
+            if text_features.get('draw'):
+                draw_count = text_features.get('draw_count', 1)
                 value_score += draw_count * 0.3
             
             # Discover/generation effects
-            if 'discover' in text or 'add a random' in text or 'create' in text:
+            if text_features.get('has_generation'):
                 value_score += 0.25
             
             # Lifesteal for sustained value
-            if 'lifesteal' in text:
+            if text_features.get('lifesteal'):
                 value_score += 0.2
             
             # Deathrattle for sticky value
-            if 'deathrattle' in text:
+            if text_features.get('deathrattle'):
                 value_score += 0.15
             
             # High-value spell generation
-            if card_type == 'SPELL' and ('damage' in text or 'destroy' in text):
+            if card_type == 'SPELL' and text_features.get('is_removal'):
                 value_score += 0.1
             
             # Hero-specific value bonuses (e.g., Warlock values card draw more)
-            hero_modifier = self._get_hero_value_modifier(deck_state.hero_class, card_id, text)
+            card_text = card_data.get('text', '')
+            hero_modifier = self._get_hero_value_modifier(deck_state.hero_class, card_id, card_text)
             
             final_score = value_score * hero_modifier
             return max(-1.0, min(1.0, final_score))
@@ -436,23 +564,31 @@ class CardEvaluationEngine:
     # === Data Management Methods ===
     
     def _ensure_fresh_data(self) -> None:
-        """Ensure HSReplay data is fresh and available."""
+        """Ensure HSReplay data is fresh and available with connection validation."""
         try:
+            # Check if HSReplay scraper is available and connected
+            if not self._validate_hsreplay_connection():
+                self.logger.warning("HSReplay connection not available, using cached data")
+                return
+            
             # Check if we need to refresh HSReplay card data
             if self._should_refresh_hsreplay_data():
                 self.logger.debug("Refreshing HSReplay card data...")
-                fresh_stats = self.hsreplay_scraper.get_underground_arena_stats()
+                
+                # Add timeout and retry logic for HSReplay API calls
+                fresh_stats = self._fetch_hsreplay_stats_with_retry()
+                
                 if fresh_stats:
                     self.hsreplay_stats = fresh_stats
                     self.last_stats_fetch = datetime.now()
                     self.logger.info(f"HSReplay card data refreshed: {len(fresh_stats)} cards")
                 else:
-                    self.logger.warning("Failed to refresh HSReplay data")
+                    self.logger.warning("Failed to refresh HSReplay data, using cached data")
             else:
                 self.cache_hits += 1
                 
         except Exception as e:
-            self.logger.error(f"Error ensuring fresh data: {e}")
+            self.logger.error(f"Error ensuring fresh data: {e}, degrading to cached data")
     
     def _should_refresh_hsreplay_data(self) -> bool:
         """Check if HSReplay data needs refreshing."""
@@ -462,6 +598,94 @@ class CardEvaluationEngine:
         # Refresh every 24 hours
         age = datetime.now() - self.last_stats_fetch
         return age.total_seconds() > (24 * 3600)
+    
+    def _validate_hsreplay_connection(self) -> bool:
+        """Validate HSReplay connection and API availability."""
+        try:
+            # Check if hsreplay_scraper exists and is not None
+            if not self.hsreplay_scraper:
+                return False
+            
+            # Check if scraper has required methods
+            if not hasattr(self.hsreplay_scraper, 'get_underground_arena_stats'):
+                self.logger.error("HSReplay scraper missing required methods")
+                return False
+            
+            # Try to get API status if available
+            if hasattr(self.hsreplay_scraper, 'get_api_status'):
+                status = self.hsreplay_scraper.get_api_status()  
+                if not status or not status.get('session_active', False):
+                    self.logger.warning("HSReplay API session not active")
+                    return False
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"HSReplay connection validation failed: {e}")
+            return False
+    
+    def _fetch_hsreplay_stats_with_retry(self, max_retries: int = 3, timeout_seconds: float = 10.0) -> dict:
+        """Fetch HSReplay stats with retry logic and timeout protection."""
+        import threading
+        import queue
+        
+        for attempt in range(max_retries):
+            try:
+                self.logger.debug(f"HSReplay fetch attempt {attempt + 1}/{max_retries}")
+                
+                # Use threading to add timeout protection
+                result_queue = queue.Queue()
+                exception_queue = queue.Queue()
+                
+                def fetch_worker():
+                    try:
+                        stats = self.hsreplay_scraper.get_underground_arena_stats()
+                        result_queue.put(stats)
+                    except Exception as e:
+                        exception_queue.put(e)
+                
+                # Start fetch in separate thread with timeout
+                thread = threading.Thread(target=fetch_worker, daemon=True)
+                thread.start()
+                thread.join(timeout=timeout_seconds)
+                
+                if thread.is_alive():
+                    self.logger.warning(f"HSReplay fetch timeout on attempt {attempt + 1}")
+                    if attempt < max_retries - 1:
+                        continue
+                    else:
+                        return None
+                
+                # Check for exceptions
+                if not exception_queue.empty():
+                    exception = exception_queue.get()
+                    self.logger.warning(f"HSReplay fetch error on attempt {attempt + 1}: {exception}")
+                    if attempt < max_retries - 1:
+                        continue
+                    else:
+                        return None
+                
+                # Get result
+                if not result_queue.empty():
+                    result = result_queue.get()
+                    if result:  # Valid result
+                        self.logger.debug(f"HSReplay fetch successful on attempt {attempt + 1}")
+                        return result
+                    else:
+                        self.logger.warning(f"HSReplay fetch returned empty data on attempt {attempt + 1}")
+                        if attempt < max_retries - 1:
+                            continue
+                        else:
+                            return None
+                            
+            except Exception as e:
+                self.logger.error(f"Unexpected error in HSReplay fetch attempt {attempt + 1}: {e}")
+                if attempt < max_retries - 1:
+                    continue
+                else:
+                    return None
+        
+        return None
     
     def _estimate_base_value_fallback(self, card_id: str, hero_class: Optional[str]) -> float:
         """Fallback base value estimation when HSReplay data unavailable."""
@@ -1719,4 +1943,204 @@ class CardEvaluationEngine:
             'timing_priority': 'Medium',
             'archetype_fit': 'Unknown',
             'explanation': f"Curve impact analysis unavailable for {card_id}"
+        }
+    
+    def _create_fallback_scores(self, error_message: str) -> DimensionalScores:
+        """Create fallback DimensionalScores when evaluation fails."""
+        return DimensionalScores(
+            card_id="fallback_card",
+            base_value=0.5,
+            tempo_score=0.5,
+            value_score=0.5,
+            synergy_score=0.5,
+            curve_score=0.5,
+            re_draftability_score=0.5,
+            greed_score=0.5,
+            confidence=0.1,  # Low confidence for fallback
+            data_quality_score=0.1
+        )
+    
+    def _prewarm_caches(self) -> None:
+        """Pre-warm caches with common card data for better performance."""
+        try:
+            # Pre-populate card data cache with frequently accessed data
+            if hasattr(self.cards_loader, 'cards_data') and self.cards_loader.cards_data:
+                common_cards = list(self.cards_loader.cards_data.keys())[:1000]  # Top 1000 cards
+                for card_id in common_cards:
+                    self._get_cached_card_data(card_id)
+                
+                self.logger.info(f"Pre-warmed card data cache with {len(common_cards)} cards")
+            
+            # Pre-analyze card text for common patterns
+            self._preanalyze_card_texts()
+            
+        except Exception as e:
+            self.logger.warning(f"Cache pre-warming failed: {e}")
+    
+    def _preanalyze_card_texts(self) -> None:
+        """Pre-analyze card texts for common keywords and effects."""
+        if not hasattr(self.cards_loader, 'cards_data'):
+            return
+        
+        keywords_to_analyze = [
+            'charge', 'rush', 'battlecry', 'taunt', 'draw', 'discover', 
+            'lifesteal', 'deathrattle', 'damage', 'destroy', 'create'
+        ]
+        
+        analyzed_count = 0
+        for card_id, card_data in self.cards_loader.cards_data.items():
+            if not isinstance(card_data, dict):
+                continue
+                
+            text = card_data.get('text', '').lower()
+            if not text:
+                continue
+            
+            text_features = {}
+            for keyword in keywords_to_analyze:
+                text_features[keyword] = keyword in text
+            
+            # Additional analysis
+            text_features['draw_count'] = text.count('draw')
+            text_features['has_generation'] = any(gen in text for gen in ['add a random', 'create', 'discover'])
+            text_features['is_removal'] = any(rem in text for rem in ['damage', 'destroy', 'silence'])
+            
+            self.text_analysis_cache[card_id] = text_features
+            analyzed_count += 1
+            
+            # Limit cache size
+            if analyzed_count >= 5000:
+                break
+        
+        self.logger.info(f"Pre-analyzed {analyzed_count} card texts for keywords")
+    
+    def _generate_cache_key(self, card_id: str, deck_state: DeckState) -> str:
+        """Generate cache key for evaluation caching."""
+        # Include key factors that affect evaluation
+        hero_class = deck_state.hero_class if deck_state else 'NEUTRAL'
+        archetype = getattr(deck_state, 'archetype', 'Unknown')
+        pick_number = getattr(deck_state, 'pick_number', 0)
+        
+        # Group pick numbers for cache efficiency (0-10, 11-20, 21-30)
+        pick_group = min(pick_number // 10, 2)
+        
+        return f"{card_id}|{hero_class}|{archetype}|{pick_group}"
+    
+    def _get_cached_evaluation(self, cache_key: str) -> Optional[DimensionalScores]:
+        """Get cached evaluation result if available and fresh."""
+        if cache_key not in self.evaluation_cache:
+            return None
+        
+        cached_entry = self.evaluation_cache[cache_key]
+        cache_time = cached_entry.get('timestamp', datetime.min)
+        
+        # Check if cache is still fresh
+        age_minutes = (datetime.now() - cache_time).total_seconds() / 60
+        if age_minutes > self.cache_ttl_minutes:
+            # Remove expired entry
+            del self.evaluation_cache[cache_key]
+            return None
+        
+        return cached_entry.get('result')
+    
+    def _cache_evaluation(self, cache_key: str, result: DimensionalScores) -> None:
+        """Cache evaluation result with timestamp."""
+        # Implement cache size management
+        if len(self.evaluation_cache) >= self.max_cache_size:
+            self._cleanup_old_cache_entries()
+        
+        self.evaluation_cache[cache_key] = {
+            'result': result,
+            'timestamp': datetime.now()
+        }
+    
+    def _cleanup_old_cache_entries(self) -> None:
+        """Remove old cache entries to manage memory usage."""
+        current_time = datetime.now()
+        expired_keys = []
+        
+        for key, entry in self.evaluation_cache.items():
+            cache_time = entry.get('timestamp', datetime.min)
+            age_minutes = (current_time - cache_time).total_seconds() / 60
+            
+            if age_minutes > self.cache_ttl_minutes:
+                expired_keys.append(key)
+        
+        # Remove expired entries
+        for key in expired_keys:
+            del self.evaluation_cache[key]
+        
+        # If still too large, remove oldest entries
+        if len(self.evaluation_cache) >= self.max_cache_size:
+            # Sort by timestamp and keep newest half
+            entries_by_time = sorted(
+                self.evaluation_cache.items(),
+                key=lambda x: x[1].get('timestamp', datetime.min),
+                reverse=True
+            )
+            
+            keep_count = self.max_cache_size // 2
+            self.evaluation_cache = dict(entries_by_time[:keep_count])
+        
+        self.logger.debug(f"Cache cleanup: removed {len(expired_keys)} expired entries")
+    
+    def _get_cached_card_data(self, card_id: str) -> Dict[str, Any]:
+        """Get cached card data for performance optimization."""
+        if card_id in self.card_data_cache:
+            return self.card_data_cache[card_id]
+        
+        # Fetch and cache card data
+        if hasattr(self.cards_loader, 'cards_data') and self.cards_loader.cards_data:
+            card_data = self.cards_loader.cards_data.get(card_id, {})
+        else:
+            card_data = {}
+        
+        # Cache with reasonable size limit
+        if len(self.card_data_cache) < 10000:
+            self.card_data_cache[card_id] = card_data
+        
+        return card_data
+    
+    def _get_cached_text_analysis(self, card_id: str) -> Dict[str, Any]:
+        """Get cached text analysis for performance optimization."""
+        if card_id in self.text_analysis_cache:
+            return self.text_analysis_cache[card_id]
+        
+        # Fallback to on-demand analysis
+        card_data = self._get_cached_card_data(card_id)
+        text = card_data.get('text', '').lower()
+        
+        text_features = {
+            'charge': 'charge' in text,
+            'rush': 'rush' in text,
+            'battlecry': 'battlecry' in text,
+            'taunt': 'taunt' in text,
+            'draw': 'draw' in text,
+            'discover': 'discover' in text,
+            'lifesteal': 'lifesteal' in text,
+            'deathrattle': 'deathrattle' in text,
+            'draw_count': text.count('draw'),
+            'has_generation': any(gen in text for gen in ['add a random', 'create', 'discover']),
+            'is_removal': any(rem in text for rem in ['damage', 'destroy', 'silence'])
+        }
+        
+        # Cache if space available
+        if len(self.text_analysis_cache) < 5000:
+            self.text_analysis_cache[card_id] = text_features
+        
+        return text_features
+    
+    def get_cache_statistics(self) -> Dict[str, Any]:
+        """Get cache performance statistics."""
+        total_requests = self.cache_hits + self.cache_miss_count
+        hit_rate = (self.cache_hits / total_requests * 100) if total_requests > 0 else 0
+        
+        return {
+            'evaluation_cache_size': len(self.evaluation_cache),
+            'card_data_cache_size': len(self.card_data_cache),
+            'text_analysis_cache_size': len(self.text_analysis_cache),
+            'cache_hits': self.cache_hits,
+            'cache_misses': self.cache_miss_count,
+            'hit_rate_percentage': round(hit_rate, 2),
+            'total_evaluations': self.evaluation_count
         }

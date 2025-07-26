@@ -48,6 +48,9 @@ class SmartCoordinateDetector:
         self.resolution_calibrations = {
             # Removed complex calibration - testing base algorithm first
         }
+        
+        # NEW: Visual Sentry integration callback
+        self.visual_sentry_callback = None  # Will be set by integrated_arena_bot_gui.py
     
     def calculate_optimal_card_size(self, screen_width: int, screen_height: int) -> Tuple[int, int]:
         """
@@ -1563,6 +1566,115 @@ class SmartCoordinateDetector:
         
         self.logger.info("✅ Coordinate plausibility check PASSED.")
         return True
+    
+    def is_active_draft_screen(self, screenshot: np.ndarray) -> bool:
+        """
+        Lightweight check to determine if we're on the active draft screen with 3 card choices visible.
+        
+        This is the Visual Sentry function that quickly determines if the user has clicked 
+        'Draft New Cards' and the three card choices are actually visible on screen.
+        
+        Uses multiple fast detection strategies:
+        1. Card-like contour detection (primary)
+        2. Gold border detection (secondary)  
+        3. Interface layout validation (tertiary)
+        
+        Args:
+            screenshot: Full screen screenshot
+            
+        Returns:
+            True if active draft screen is detected with 3 cards visible
+        """
+        try:
+            if screenshot is None or screenshot.size == 0:
+                return False
+                
+            height, width = screenshot.shape[:2]
+            
+            # Strategy 1: Fast contour detection for card-like rectangles
+            gray = cv2.cvtColor(screenshot, cv2.COLOR_BGR2GRAY)
+            
+            # Use adaptive threshold for better edge detection in various lighting
+            adaptive_thresh = cv2.adaptiveThreshold(
+                gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
+            )
+            
+            # Find contours
+            contours, _ = cv2.findContours(adaptive_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            card_like_regions = 0
+            for contour in contours:
+                area = cv2.contourArea(contour)
+                
+                # Look for medium-to-large rectangular regions (potential cards)
+                if 10000 < area < 300000:  # Card-sized areas
+                    x, y, w, h = cv2.boundingRect(contour)
+                    
+                    # Check aspect ratio (cards are taller than wide)
+                    aspect_ratio = w / h if h > 0 else 0
+                    if 0.55 < aspect_ratio < 0.85:  # Hearthstone card-like ratio
+                        # Additional size validation
+                        if w > 150 and h > 200:  # Minimum card dimensions
+                            card_like_regions += 1
+                            
+                            # Early success - if we find 3 card-like regions, likely active draft
+                            if card_like_regions >= 3:
+                                self.logger.debug(f"✅ Active draft screen detected: {card_like_regions} card-like regions found")
+                                return True
+            
+            # Strategy 2: Gold border detection (Hearthstone cards have gold borders)
+            if card_like_regions >= 2:  # If we found 2 card-like regions, check for gold borders
+                hsv = cv2.cvtColor(screenshot, cv2.COLOR_BGR2HSV)
+                
+                # Gold/yellow color range for card borders
+                lower_gold = np.array([20, 100, 100])
+                upper_gold = np.array([30, 255, 255])
+                gold_mask = cv2.inRange(hsv, lower_gold, upper_gold)
+                
+                # Count gold pixels - active draft screen should have significant gold content
+                gold_pixel_count = np.sum(gold_mask > 0)
+                gold_percentage = gold_pixel_count / (width * height)
+                
+                if gold_percentage > 0.02:  # At least 2% gold pixels suggests cards are visible
+                    self.logger.debug(f"✅ Active draft screen detected: {card_like_regions} regions + {gold_percentage:.3f} gold content")
+                    return True
+            
+            # Strategy 3: Interface layout validation - look for draft interface structure
+            if card_like_regions >= 2:
+                # Check if regions are horizontally distributed (typical draft layout)
+                card_centers = []
+                for contour in contours:
+                    area = cv2.contourArea(contour)
+                    if 10000 < area < 300000:
+                        x, y, w, h = cv2.boundingRect(contour)
+                        aspect_ratio = w / h if h > 0 else 0
+                        if 0.55 < aspect_ratio < 0.85 and w > 150 and h > 200:
+                            center_x = x + w // 2
+                            center_y = y + h // 2
+                            card_centers.append((center_x, center_y))
+                
+                if len(card_centers) >= 2:
+                    # Check horizontal distribution
+                    card_centers.sort(key=lambda c: c[0])  # Sort by x coordinate
+                    x_spread = card_centers[-1][0] - card_centers[0][0]
+                    
+                    # Cards should be spread across at least 30% of screen width
+                    if x_spread > width * 0.3:
+                        # Check vertical alignment (cards should be roughly at same height)
+                        avg_y = sum(c[1] for c in card_centers) / len(card_centers)
+                        y_variance = max(abs(c[1] - avg_y) for c in card_centers)
+                        
+                        if y_variance < height * 0.1:  # Cards aligned within 10% of screen height
+                            self.logger.debug(f"✅ Active draft screen detected: {len(card_centers)} aligned cards with spread {x_spread}")
+                            return True
+            
+            # Not enough evidence for active draft screen
+            self.logger.debug(f"❌ Not active draft screen: only {card_like_regions} card-like regions found")
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"Error in is_active_draft_screen: {e}")
+            return False
 
 
 def benchmark_detection_methods(screenshot_path: str = None) -> Dict[str, Any]:

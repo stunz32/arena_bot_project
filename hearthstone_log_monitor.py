@@ -66,10 +66,21 @@ class HearthstoneLogMonitor:
         self.current_draft_picks: List[DraftPick] = []
         self.current_hero: Optional[str] = None
         self.current_hero_choices: List[str] = []  # NEW: Available hero choices
-        self.draft_phase = "waiting"  # NEW: Track draft phase (hero_selection, card_picks)
+        self.draft_phase = "waiting"  # NEW: Track draft phase (waiting, hero_selection, awaiting_choices, card_picks)
         
         # Event queue for automation (thread-safe communication)
         self.event_queue = event_queue
+        
+        # Enhanced Visual Sentry system - robust two-stage verification
+        self.visual_sentry_state = 'IDLE'  # IDLE, WATCHING_FOR_CARDS, CONFIRMED_CARDS, ANALYSIS_TRIGGERED
+        self.visual_sentry_lock = threading.Lock()  # Thread-safe state management
+        self.visual_sentry_timeout = 30.0  # Maximum watching period (seconds)
+        self.visual_sentry_start_time = None
+        self.consecutive_confirmations = 0  # Track consecutive positive visual confirmations
+        self.required_confirmations = 2  # Require 2 consecutive confirmations for robustness
+        
+        # NEW: Visual confirmation callback from coordinate detector
+        self.visual_confirmation_callback = None  # Will be set by integrated_arena_bot_gui.py
         
         # Legacy callbacks (maintained for backward compatibility)
         self.on_game_state_change = None
@@ -371,7 +382,7 @@ class HearthstoneLogMonitor:
                 self.draft_phase = "card_picks"
                 print(f"👑 HERO SELECTED: {hero_code}")
             
-            # Draft start detection (card picks phase)
+            # Draft start detection (card picks phase) - ENHANCED VISUAL SENTRY LOGIC
             if self.patterns['draft_choices'].search(message):
                 if self.current_game_state != GameState.ARENA_DRAFT:
                     self._display_draft_start()
@@ -380,24 +391,21 @@ class HearthstoneLogMonitor:
                     if self.on_draft_start:
                         self.on_draft_start()
                 
-                # Enhanced with hero context
+                # STAGE 1: Log Watcher - Start Visual Sentry watching
                 if self.draft_phase != "hero_selection":
-                    self.draft_phase = "card_picks"
+                    self.draft_phase = "awaiting_choices"
+                    self.visual_sentry_trigger_watching()  # NEW: Visual Sentry Stage 1
                     
-                # NEW: Trigger automatic screenshot analysis when card choices appear
-                print(f"🤖 Card choices detected - triggering automatic analysis")
-                event_data = {
-                    'type': 'CARD_CHOICES_READY',
-                    'draft_phase': self.draft_phase,
-                    'timestamp': entry.timestamp if 'entry' in locals() else None
-                }
-                
-                # Queue event for automation
-                self._queue_event(event_data)
-                
-                # Legacy callback for backward compatibility
-                if self.on_card_choices_ready:
-                    self.on_card_choices_ready(event_data)
+                    # Fire DRAFT_WATCHING_STARTED event (not immediate analysis)
+                    event_data = {
+                        'type': 'DRAFT_WATCHING_STARTED',
+                        'draft_phase': self.draft_phase, 
+                        'visual_sentry_state': self.visual_sentry_state,
+                        'timestamp': entry.timestamp if 'entry' in locals() else None
+                    }
+                    
+                    # Queue event for automation
+                    self._queue_event(event_data)
             
             # Current deck contents (for mid-draft analysis)
             deck_card_match = self.patterns['draft_deck_card'].search(message)
@@ -624,6 +632,236 @@ class HearthstoneLogMonitor:
         self.monitoring = False
         print("⏸️ Log monitoring stopped")
     
+    def _start_visual_sentry_watching(self):
+        """
+        STAGE 1: Initialize Visual Sentry watching state.
+        Sets state to WATCHING_FOR_CARDS and starts timeout timer.
+        """
+        with self.visual_sentry_lock:
+            self.visual_sentry_state = 'WATCHING_FOR_CARDS'
+            self.visual_sentry_start_time = time.time()
+            self.consecutive_confirmations = 0
+            
+            print(f"🔍 VISUAL SENTRY: Started watching for cards (timeout: {self.visual_sentry_timeout}s)")
+            print(f"📊 State: {self.visual_sentry_state} | Draft Phase: {self.draft_phase}")
+    
+    def visual_sentry_confirm_cards(self, confirmation_source: str = "gui"):
+        """
+        STAGE 2: Record visual confirmation that three cards are visible.
+        
+        Args:
+            confirmation_source: Source of confirmation ("gui", "detector", etc.)
+            
+        Returns:
+            bool: True if analysis should be triggered, False if more confirmations needed
+        """
+        with self.visual_sentry_lock:
+            # Check if we're in the right state to accept confirmations
+            if self.visual_sentry_state != 'WATCHING_FOR_CARDS':
+                print(f"⚠️ VISUAL SENTRY: Cannot confirm - not in WATCHING state (current: {self.visual_sentry_state})")
+                return False
+            
+            # Check timeout
+            if self.visual_sentry_start_time and (time.time() - self.visual_sentry_start_time) > self.visual_sentry_timeout:
+                print(f"⏰ VISUAL SENTRY: Timeout reached - resetting to IDLE")
+                self._reset_visual_sentry()
+                return False
+            
+            # Record confirmation
+            self.consecutive_confirmations += 1
+            print(f"✅ VISUAL SENTRY: Confirmation {self.consecutive_confirmations}/{self.required_confirmations} from {confirmation_source}")
+            
+            # Check if we have enough confirmations
+            if self.consecutive_confirmations >= self.required_confirmations:
+                self.visual_sentry_state = 'CONFIRMED_CARDS'
+                print(f"🎯 VISUAL SENTRY: CARDS CONFIRMED - Triggering analysis!")
+                
+                # STAGE 3: Fire the CARD_CHOICES_READY event
+                self._fire_card_choices_ready()
+                return True
+            else:
+                print(f"🔄 VISUAL SENTRY: Need {self.required_confirmations - self.consecutive_confirmations} more confirmations")
+                return False
+    
+    def visual_sentry_reject_cards(self, rejection_reason: str = "no_cards"):
+        """
+        Record visual rejection (cards not visible or wrong screen).
+        Resets consecutive confirmations but keeps watching.
+        
+        Args:
+            rejection_reason: Reason for rejection ("no_cards", "wrong_screen", etc.)
+        """
+        with self.visual_sentry_lock:
+            if self.visual_sentry_state == 'WATCHING_FOR_CARDS':
+                # Reset consecutive confirmations but keep watching
+                if self.consecutive_confirmations > 0:
+                    print(f"❌ VISUAL SENTRY: Rejection ({rejection_reason}) - resetting confirmations")
+                    self.consecutive_confirmations = 0
+                
+                # Check timeout
+                if self.visual_sentry_start_time and (time.time() - self.visual_sentry_start_time) > self.visual_sentry_timeout:
+                    print(f"⏰ VISUAL SENTRY: Timeout reached during rejection - resetting to IDLE")
+                    self._reset_visual_sentry()
+    
+    def _fire_card_choices_ready(self):
+        """
+        STAGE 3: Fire the CARD_CHOICES_READY event after visual confirmation.
+        This replaces the old immediate firing system.
+        """
+        self.draft_phase = "card_picks"
+        self.visual_sentry_state = 'ANALYSIS_TRIGGERED'
+        
+        event_data = {
+            'type': 'CARD_CHOICES_READY',
+            'draft_phase': self.draft_phase,
+            'visual_sentry_state': self.visual_sentry_state,
+            'confirmations_received': self.consecutive_confirmations,
+            'timestamp': datetime.now()
+        }
+        
+        # Queue event for automation
+        self._queue_event(event_data)
+        
+        # Legacy callback for backward compatibility
+        if self.on_card_choices_ready:
+            self.on_card_choices_ready(event_data)
+        
+        print(f"🚀 CARD_CHOICES_READY event fired with {self.consecutive_confirmations} confirmations")
+    
+    def _reset_visual_sentry(self):
+        """Reset Visual Sentry to IDLE state."""
+        self.visual_sentry_state = 'IDLE'
+        self.visual_sentry_start_time = None
+        self.consecutive_confirmations = 0
+        print(f"🔄 VISUAL SENTRY: Reset to IDLE state")
+    
+    def get_visual_sentry_status(self) -> Dict[str, Any]:
+        """Get current Visual Sentry status for debugging."""
+        with self.visual_sentry_lock:
+            elapsed_time = 0
+            if self.visual_sentry_start_time:
+                elapsed_time = time.time() - self.visual_sentry_start_time
+                
+            return {
+                'state': self.visual_sentry_state,
+                'draft_phase': self.draft_phase,
+                'consecutive_confirmations': self.consecutive_confirmations,
+                'required_confirmations': self.required_confirmations,
+                'elapsed_time': elapsed_time,
+                'timeout': self.visual_sentry_timeout,
+                'timed_out': elapsed_time > self.visual_sentry_timeout if self.visual_sentry_start_time else False
+            }
+
+    def confirm_active_draft_screen(self):
+        """
+        LEGACY METHOD: Maintained for backward compatibility.
+        Now routes to the new Visual Sentry system.
+        """
+        return self.visual_sentry_confirm_cards("legacy_gui")
+
+    def visual_sentry_trigger_watching(self):
+        """
+        Stage 1 of Visual Sentry: Log monitor triggers 'watching' state.
+        Called when draft-related logs are detected.
+        """
+        with self.visual_sentry_lock:
+            if self.visual_sentry_state == 'IDLE':
+                self.visual_sentry_state = 'WATCHING_FOR_CARDS'
+                self.visual_sentry_start_time = time.time()
+                self.consecutive_confirmations = 0
+                print(f"🔍 Visual Sentry STAGE 1: Now watching for card choices (timeout: {self.visual_sentry_timeout}s)")
+                
+                # Queue event for GUI automation
+                self._queue_event({
+                    'type': 'visual_sentry_watching',
+                    'state': 'WATCHING_FOR_CARDS',
+                    'timeout': self.visual_sentry_timeout
+                })
+                
+                return True
+            else:
+                print(f"⚠️ Visual Sentry already in state: {self.visual_sentry_state}")
+                return False
+
+    def visual_sentry_confirm_cards(self, source="unknown"):
+        """
+        Stage 2 of Visual Sentry: Visual confirmation that three draft cards are visible.
+        Called by coordinate detector when cards are visually confirmed.
+        
+        Args:
+            source: Source of the confirmation (for debugging)
+            
+        Returns:
+            bool: True if analysis should be triggered
+        """
+        with self.visual_sentry_lock:
+            current_time = time.time()
+            
+            # Check if we're in watching state
+            if self.visual_sentry_state != 'WATCHING_FOR_CARDS':
+                print(f"⚠️ Visual Sentry confirmation from {source} ignored - not in watching state (current: {self.visual_sentry_state})")
+                return False
+            
+            # Check for timeout
+            if self.visual_sentry_start_time and (current_time - self.visual_sentry_start_time) > self.visual_sentry_timeout:
+                print(f"⏰ Visual Sentry timeout exceeded, resetting to IDLE")
+                self.visual_sentry_state = 'IDLE'
+                return False
+            
+            # Increment consecutive confirmations
+            self.consecutive_confirmations += 1
+            print(f"✅ Visual Sentry STAGE 2: Cards confirmed by {source} (confirmations: {self.consecutive_confirmations}/{self.required_confirmations})")
+            
+            # Check if we have enough confirmations
+            if self.consecutive_confirmations >= self.required_confirmations:
+                self.visual_sentry_state = 'CONFIRMED_CARDS'
+                print(f"🎯 Visual Sentry STAGE 2 COMPLETE: Cards visually confirmed, triggering analysis!")
+                
+                # Queue event for GUI automation to trigger analysis
+                self._queue_event({
+                    'type': 'visual_sentry_confirmed',
+                    'state': 'CONFIRMED_CARDS',
+                    'source': source,
+                    'confirmations': self.consecutive_confirmations
+                })
+                
+                # Mark as analysis triggered and reset
+                self.visual_sentry_state = 'ANALYSIS_TRIGGERED'
+                return True
+            else:
+                print(f"🔍 Visual Sentry: Need {self.required_confirmations - self.consecutive_confirmations} more confirmations")
+                return False
+
+    def visual_sentry_reset(self):
+        """Reset Visual Sentry system to IDLE state."""
+        with self.visual_sentry_lock:
+            old_state = self.visual_sentry_state
+            self.visual_sentry_state = 'IDLE'
+            self.consecutive_confirmations = 0
+            self.visual_sentry_start_time = None
+            print(f"🔄 Visual Sentry reset from {old_state} to IDLE")
+
+    def get_visual_sentry_status(self) -> Dict:
+        """Get current Visual Sentry system status."""
+        with self.visual_sentry_lock:
+            current_time = time.time()
+            time_since_start = 0
+            time_remaining = 0
+            
+            if self.visual_sentry_start_time:
+                time_since_start = current_time - self.visual_sentry_start_time
+                time_remaining = max(0, self.visual_sentry_timeout - time_since_start)
+            
+            return {
+                'state': self.visual_sentry_state,
+                'consecutive_confirmations': self.consecutive_confirmations,
+                'required_confirmations': self.required_confirmations,
+                'time_since_start': time_since_start,
+                'time_remaining': time_remaining,
+                'is_watching': self.visual_sentry_state == 'WATCHING_FOR_CARDS',
+                'is_confirmed': self.visual_sentry_state == 'CONFIRMED_CARDS'
+            }
+
     def get_current_state(self) -> Dict:
         """Get current game state information."""
         return {
@@ -632,6 +870,8 @@ class HearthstoneLogMonitor:
             'available_logs': list(self.log_files.keys()),
             'draft_picks_count': len(self.current_draft_picks),
             'current_hero': self.current_hero,
+            'draft_phase': self.draft_phase,  # Include current draft phase
+            'visual_sentry_status': self.get_visual_sentry_status(),  # NEW: Visual Sentry status
             'recent_picks': [
                 {
                     'slot': pick.slot,

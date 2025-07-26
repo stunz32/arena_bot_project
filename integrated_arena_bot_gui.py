@@ -63,6 +63,13 @@ from arena_bot.ai_v2.draft_tracking_integration import DraftTrackingIntegrator
 # Import AI v2 System Health Monitor
 from arena_bot.ai_v2.system_health_monitor import get_health_monitor
 
+# Import Enhanced Observability System
+from arena_bot.ai_v2.logging_utils import (
+    get_structured_logger, RequestContext, GUILogHandler,
+    log_performance, time_operation, log_state_change, log_complex_error,
+    LogCategory
+)
+
 class ManualCorrectionDialog(tk.Toplevel):
     """
     Dialog window for manual card correction with auto-complete search.
@@ -283,6 +290,16 @@ class IntegratedArenaBotGUI:
         self.logger = get_logger(__name__)
         self.logger.info("🚀 Integrated Arena Bot starting up...")
         
+        # Initialize Enhanced Observability System
+        self.log_queue = Queue()  # Queue for GUI log display
+        self.structured_logger = get_structured_logger("IntegratedArenaBotGUI", self.log_queue)
+        self.structured_logger.info(
+            "Enhanced observability system initialized", 
+            category=LogCategory.INITIALIZATION,
+            version="2.0",
+            features=["request_tracking", "performance_monitoring", "gui_integration"]
+        )
+        
         # Step 1: Initialize ALL state variables and components FIRST
         self.running = False
         self.last_full_analysis_result = None
@@ -294,12 +311,20 @@ class IntegratedArenaBotGUI:
         self._enable_custom_mode_on_startup = False
         self.analysis_in_progress = False
         self.cache_build_in_progress = False
+        self.analysis_lock = threading.Lock()  # Proper thread-safe locking
         self.last_analysis_candidates = [[], [], []]
         self._gui_start_time = time.time()  # For health monitoring
         self.last_detection_result = None
         self.result_queue = Queue()
         self.ui_queue = Queue()
         self.event_queue = Queue()  # Queue for log monitor events
+        
+        # Visual Sentry system - two-stage trigger mechanism
+        self.bot_state = 'IDLE'  # IDLE, AWAITING_CARD_CHOICES, POLLING_FOR_CARDS, ANALYSIS_TRIGGERED
+        self._log_state_change('INIT', 'IDLE', 'system_startup')
+        self.visual_sentry_thread = None
+        self.visual_sentry_running = False
+        self.visual_sentry_lock = threading.Lock()  # Thread-safe Visual Sentry control
 
         # Step 2: Initialize all subsystems
         self.init_log_monitoring()
@@ -346,6 +371,189 @@ class IntegratedArenaBotGUI:
         
         self.logger.info("🎯 Integrated Arena Bot GUI ready!")
         print("🎯 Integrated Arena Bot GUI ready!")
+        
+        # Start processing GUI log queue
+        if hasattr(self, 'log_queue'):
+            self.root.after(100, self._process_log_queue)
+    
+    def _log_state_change(self, from_state: str, to_state: str, trigger: str) -> None:
+        """Helper method to log bot state changes with structured logging."""
+        if hasattr(self, 'structured_logger'):
+            log_state_change(
+                self.structured_logger,
+                "IntegratedArenaBotGUI",
+                from_state,
+                to_state,
+                trigger
+            )
+    
+    def _process_log_queue(self):
+        """Process structured log entries from the queue and display them in GUI."""
+        try:
+            # Process up to 10 log entries per cycle to avoid GUI freezing
+            for _ in range(10):
+                if self.log_queue.empty():
+                    break
+                    
+                log_entry = self.log_queue.get_nowait()
+                self._display_structured_log(log_entry)
+                
+        except Exception as e:
+            # Don't let log processing errors crash the application
+            pass
+        finally:
+            # Schedule next processing cycle
+            if hasattr(self, 'root') and self.root:
+                self.root.after(100, self._process_log_queue)
+    
+    def _display_structured_log(self, log_entry):
+        """Display a structured log entry in the GUI."""
+        try:
+            if not hasattr(self, 'structured_log_widget'):
+                return
+                
+            # Store entry for filtering
+            self.structured_log_entries.append(log_entry)
+            
+            # Apply current filters
+            if self._should_show_log_entry(log_entry):
+                self._add_log_entry_to_widget(log_entry)
+                
+            # Limit stored entries to prevent memory issues
+            if len(self.structured_log_entries) > 1000:
+                self.structured_log_entries = self.structured_log_entries[-800:]
+                
+        except Exception as e:
+            # Don't let display errors crash the application
+            pass
+    
+    def _should_show_log_entry(self, log_entry):
+        """Check if log entry should be shown based on current filters."""
+        # Level filter
+        level_filter = self.log_level_filter.get()
+        if level_filter != "ALL" and log_entry.get('level', '') != level_filter:
+            return False
+            
+        # Request ID filter
+        request_id_filter = self.request_id_filter.get().strip()
+        if request_id_filter:
+            structured_data = log_entry.get('structured_data', {})
+            entry_request_id = structured_data.get('request_id', '')
+            if request_id_filter.lower() not in entry_request_id.lower():
+                return False
+                
+        return True
+    
+    def _add_log_entry_to_widget(self, log_entry):
+        """Add a log entry to the structured log widget with formatting."""
+        try:
+            widget = self.structured_log_widget
+            level = log_entry.get('level', 'INFO')
+            message = log_entry.get('message', '')
+            structured_data = log_entry.get('structured_data', {})
+            
+            # Format timestamp
+            timestamp = structured_data.get('timestamp', 'Unknown')
+            if timestamp != 'Unknown':
+                # Convert ISO timestamp to readable format
+                try:
+                    from datetime import datetime
+                    dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                    timestamp = dt.strftime('%H:%M:%S.%f')[:-3]  # HH:MM:SS.mmm
+                except:
+                    timestamp = timestamp[:19]  # Fallback
+            
+            # Format request ID
+            request_id = structured_data.get('request_id', '')
+            request_id_short = request_id[:8] + '...' if len(request_id) > 8 else request_id
+            
+            # Format component
+            component = structured_data.get('component', 'Unknown')
+            
+            # Build formatted message
+            if request_id:
+                formatted_line = f"[{timestamp}] [{request_id_short}] [{component}] {level}: {message}\n"
+            else:
+                formatted_line = f"[{timestamp}] [{component}] {level}: {message}\n"
+            
+            # Insert with appropriate color tag
+            widget.insert(tk.END, formatted_line, level)
+            
+            # Add context data if available
+            context = structured_data.get('context', {})
+            if context:
+                context_lines = []
+                for key, value in context.items():
+                    if key not in ['timestamp', 'component', 'request_id']:
+                        context_lines.append(f"  {key}: {value}")
+                
+                if context_lines:
+                    context_text = '\n'.join(context_lines) + '\n'
+                    widget.insert(tk.END, context_text, "DEBUG")
+            
+            # Auto-scroll to bottom
+            widget.see(tk.END)
+            
+        except Exception as e:
+            # Don't let formatting errors crash the application
+            pass
+    
+    def _filter_structured_logs(self, event=None):
+        """Re-filter and redisplay structured logs based on current filter settings."""
+        try:
+            if not hasattr(self, 'structured_log_widget'):
+                return
+                
+            # Clear current display
+            self.structured_log_widget.delete(1.0, tk.END)
+            
+            # Redisplay filtered entries
+            for log_entry in self.structured_log_entries:
+                if self._should_show_log_entry(log_entry):
+                    self._add_log_entry_to_widget(log_entry)
+                    
+        except Exception as e:
+            # Don't let filtering errors crash the application
+            pass
+    
+    def _clear_structured_logs(self):
+        """Clear all structured log entries."""
+        try:
+            if hasattr(self, 'structured_log_widget'):
+                self.structured_log_widget.delete(1.0, tk.END)
+            self.structured_log_entries = []
+        except Exception as e:
+            pass
+    
+    def _export_structured_logs(self):
+        """Export structured logs to a JSON file."""
+        try:
+            from tkinter import filedialog
+            import json
+            from datetime import datetime
+            
+            if not self.structured_log_entries:
+                messagebox.showinfo("Export Logs", "No log entries to export.")
+                return
+            
+            # Ask user for file location
+            filename = filedialog.asksaveasfilename(
+                title="Export Structured Logs",
+                defaultextension=".json",
+                filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+                initialname=f"arena_bot_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            )
+            
+            if filename:
+                with open(filename, 'w', encoding='utf-8') as f:
+                    json.dump(self.structured_log_entries, f, indent=2, default=str)
+                
+                messagebox.showinfo("Export Complete", f"Structured logs exported to:\n{filename}")
+                self.log_text(f"📄 Structured logs exported to: {filename}")
+                
+        except Exception as e:
+            messagebox.showerror("Export Error", f"Failed to export logs: {e}")
+            self.log_text(f"❌ Log export failed: {e}")
     
     def _run_detection_with_timeout(self, detection_func, timeout_seconds: float, method_name: str):
         """
@@ -627,23 +835,32 @@ class IntegratedArenaBotGUI:
                     
                     self.card_name_labels[i].config(text=display_text)
                     
-                    # Update card image if possible
+                    # Update card image using high-quality asset library
                     if hasattr(self, 'asset_loader') and self.asset_loader:
                         try:
                             card_code = card_data.get('card_code', '')
                             base_code = card_code.replace('_premium', '')
-                            is_premium = '_premium' in card_code
+                            is_premium = card_data.get('is_premium', False) or '_premium' in card_code
                             
-                            card_image = self.asset_loader.load_card_image(base_code, premium=is_premium)
-                            if card_image is not None:
-                                # Convert to PIL and resize for display
-                                from PIL import Image, ImageTk
-                                pil_image = Image.fromarray(cv2.cvtColor(card_image, cv2.COLOR_BGR2RGB))
-                                pil_image = pil_image.resize((200, 280), Image.Resampling.LANCZOS)
-                                photo = ImageTk.PhotoImage(pil_image)
+                            # Use asset loader to get the correct image path
+                            card_image_path = self.asset_loader.get_card_image_path(base_code, premium=is_premium)
+                            
+                            if card_image_path.exists():
+                                # Load high-quality image directly using PIL
+                                img = Image.open(card_image_path)
+                                img = img.resize((200, 280), Image.Resampling.LANCZOS)
+                                photo = ImageTk.PhotoImage(img)
                                 
-                                self.card_image_labels[i].config(image=photo)
-                                self.card_image_labels[i].image = photo  # Keep reference
+                                # Fix garbage collection bug with proper reference management
+                                self.card_image_labels[i].config(image=photo, text="")
+                                self.card_image_labels[i].image = photo  # CRITICAL: prevents garbage collection
+                                
+                                # Store additional reference for extra safety
+                                if len(self.card_image_refs) <= i:
+                                    self.card_image_refs.extend([None] * (i + 1 - len(self.card_image_refs)))
+                                self.card_image_refs[i] = photo
+                            else:
+                                self.log_text(f"⚠️ High-quality asset not found: {card_image_path}")
                         except Exception as e:
                             self.log_text(f"⚠️ Could not update image for card {i+1}: {e}")
             
@@ -691,6 +908,137 @@ class IntegratedArenaBotGUI:
             # Schedule the next check
             self.root.after(100, self._process_ui_queue)
     
+    def _visual_sentry_polling_loop(self):
+        """
+        Visual Sentry polling loop - runs in background thread.
+        
+        Periodically takes screenshots and checks if we're on the active draft screen.
+        When active draft screen is detected, it signals the main thread and terminates.
+        """
+        self.logger.info("🔍 Visual Sentry polling loop started...")
+        polling_interval = 1.5  # Poll every 1.5 seconds
+        
+        try:
+            while self.visual_sentry_running:
+                try:
+                    # Take screenshot for visual validation
+                    screenshot = self.take_screenshot()
+                    if screenshot is not None:
+                        # Check if we're on the active draft screen
+                        if hasattr(self, 'smart_detector') and self.smart_detector:
+                            is_active = self.smart_detector.is_active_draft_screen(screenshot)
+                        else:
+                            # Fallback if smart_detector not available
+                            is_active = False
+                        
+                        if is_active:
+                            self.logger.info("✅ Visual Sentry: Active draft screen detected!")
+                            
+                            # Signal the main thread that visual confirmation was received
+                            self.event_queue.put({
+                                'event': 'VISUAL_CONFIRMATION_RECEIVED',
+                                'timestamp': datetime.now(),
+                                'source': 'visual_sentry'
+                            })
+                            
+                            # Job done - stop polling
+                            self._stop_visual_sentry()
+                            return
+                        else:
+                            # Still waiting for active draft screen
+                            self.logger.debug("Visual Sentry: Still waiting for active draft screen...")
+                    else:
+                        self.logger.warning("Visual Sentry: Failed to capture screenshot")
+                    
+                    # Sleep for polling interval if still running
+                    if self.visual_sentry_running:
+                        time.sleep(polling_interval)
+                        
+                except Exception as e:
+                    self.logger.error(f"Error in Visual Sentry polling: {e}")
+                    # Continue polling despite errors
+                    if self.visual_sentry_running:
+                        time.sleep(polling_interval)
+                        
+        except Exception as e:
+            self.logger.error(f"Fatal error in Visual Sentry: {e}")
+        finally:
+            self.logger.info("🔍 Visual Sentry polling loop terminated")
+    
+    def _start_visual_sentry(self):
+        """
+        Start the Visual Sentry background polling thread.
+        """
+        with self.visual_sentry_lock:
+            if self.visual_sentry_running:
+                self.logger.warning("Visual Sentry already running")
+                return
+            
+            self.logger.info("🚀 Starting Visual Sentry thread...")
+            self.visual_sentry_running = True
+            old_state = self.bot_state
+            self.bot_state = 'POLLING_FOR_CARDS'
+            self._log_state_change(old_state, 'POLLING_FOR_CARDS', 'visual_sentry_start')
+            
+            # Start the polling thread
+            self.visual_sentry_thread = threading.Thread(
+                target=self._visual_sentry_polling_loop,
+                daemon=True,
+                name="VisualSentryThread"
+            )
+            self.visual_sentry_thread.start()
+            
+            self.log_text("🔍 Visual Sentry started - polling for active draft screen...")
+    
+    def _stop_visual_sentry(self):
+        """
+        Stop the Visual Sentry background polling thread.
+        """
+        with self.visual_sentry_lock:
+            if not self.visual_sentry_running:
+                return
+            
+            self.logger.info("⏹️ Stopping Visual Sentry thread...")
+            self.visual_sentry_running = False
+            
+            # Wait for thread to finish (with timeout)
+            if self.visual_sentry_thread and self.visual_sentry_thread.is_alive():
+                self.visual_sentry_thread.join(timeout=3.0)
+                if self.visual_sentry_thread.is_alive():
+                    self.logger.warning("Visual Sentry thread did not terminate cleanly")
+            
+            self.visual_sentry_thread = None
+            self.logger.info("⏹️ Visual Sentry stopped")
+    
+    def take_screenshot(self) -> Optional[np.ndarray]:
+        """
+        Take a simple screenshot for Visual Sentry system.
+        
+        This is a lightweight screenshot method specifically for Visual Sentry polling.
+        Does not trigger any analysis - just captures the screen for visual validation.
+        
+        Returns:
+            Screenshot as numpy array (BGR format) or None if failed
+        """
+        try:
+            from PIL import ImageGrab
+            import cv2
+            
+            # Capture full screen using PIL
+            screenshot_pil = ImageGrab.grab()
+            
+            # Convert to OpenCV format (RGB to BGR)
+            screenshot = cv2.cvtColor(np.array(screenshot_pil), cv2.COLOR_RGB2BGR)
+            
+            return screenshot
+            
+        except ImportError:
+            self.logger.error("PIL not available for screenshot capture")
+            return None
+        except Exception as e:
+            self.logger.error(f"Failed to capture screenshot: {e}")
+            return None
+    
     def _check_for_events(self):
         """Check for events from log monitor and other automation sources."""
         try:
@@ -708,7 +1056,7 @@ class IntegratedArenaBotGUI:
             self.root.after(100, self._check_for_events)
     
     def _process_automation_event(self, event):
-        """Process automation events from log monitor."""
+        """Process automation events from log monitor and Visual Sentry system."""
         try:
             event_type = event.get('type', 'unknown')
             
@@ -716,9 +1064,37 @@ class IntegratedArenaBotGUI:
                 self.logger.info("🎯 Hero choices detected - automation ready")
                 # Could trigger hero selection analysis here
                 
+            elif event_type == 'DRAFT_CHOICES_DETECTED':
+                # Visual Sentry State Machine - Stage 2: IN_ARENA_HUB
+                self.logger.info("🏛️ Entered Arena Hub - starting Visual Sentry system")
+                self.log_text("🏛️ Entered Arena Hub. Starting visual watcher...")
+                old_state = self.bot_state
+                self.bot_state = 'AWAITING_CARD_CHOICES'
+                self._log_state_change(old_state, 'AWAITING_CARD_CHOICES', 'arena_hub_entered')
+                
+                # Start Visual Sentry polling thread
+                self._start_visual_sentry()
+                
+            elif event_type == 'VISUAL_CONFIRMATION_RECEIVED':
+                # Visual Sentry State Machine - Stage 4: ANALYSIS_TRIGGERED
+                self.logger.info("✅ Visual confirmation received! Triggering full card analysis...")
+                self.log_text("✅ Visual confirmation received! Triggering full card analysis...")
+                old_state = self.bot_state
+                self.bot_state = 'ANALYSIS_TRIGGERED'
+                self._log_state_change(old_state, 'ANALYSIS_TRIGGERED', 'visual_confirmation_received')
+                
+                # Confirm with log monitor to transition to card_picks phase
+                if hasattr(self, 'log_monitor') and self.log_monitor:
+                    self.log_monitor.confirm_active_draft_screen()
+                else:
+                    self.logger.warning("Log monitor not available for confirmation")
+                
+                # Trigger the full analysis pipeline
+                self.manual_screenshot()
+                
             elif event_type == 'CARD_CHOICES_READY':
-                self.logger.info("🎯 Card choices detected - triggering automatic analysis")
-                # Trigger automatic screenshot analysis
+                self.logger.info("🎯 Card choices confirmed - triggering automatic analysis")
+                # This event now only fires after visual confirmation
                 self.manual_screenshot()
                 
             else:
@@ -1191,12 +1567,13 @@ class IntegratedArenaBotGUI:
             print(f"⚠️ Legacy AI advisor not available: {e}")
             self.advisor = None
         
-        # NEW: Initialize AI v2 system
+        # NEW: Initialize AI v2 system with proper error classification
         try:
             from arena_bot.ai_v2.system_integrator import SystemIntegrator
             from arena_bot.ai_v2.hero_selector import HeroSelectionAdvisor
             from arena_bot.ai_v2.grandmaster_advisor import GrandmasterAdvisor
             
+            # Initialize components - structural failures will propagate up
             self.ai_v2_integrator = SystemIntegrator()
             self.hero_selector = HeroSelectionAdvisor()
             self.grandmaster_advisor = GrandmasterAdvisor()
@@ -1206,11 +1583,39 @@ class IntegratedArenaBotGUI:
             print("   • Grandmaster Advisor with dimensional scoring")
             print("   • System Integrator with comprehensive error recovery")
             
-        except Exception as e:
-            print(f"⚠️ AI v2 system not available: {e}")
+        except (ImportError, ModuleNotFoundError) as e:
+            # Critical structural errors - these indicate broken installation
+            print(f"❌ CRITICAL: AI v2 system has structural problems: {e}")
+            print("   This indicates a broken installation or missing dependencies.")
+            print("   Some features may not work correctly.")
             self.ai_v2_integrator = None
             self.hero_selector = None
             self.grandmaster_advisor = None
+        except Exception as e:
+            # Other errors may be recoverable - check if components partially initialized
+            error_type = type(e).__name__
+            if 'circular' in str(e).lower() or 'import' in str(e).lower():
+                print(f"❌ CRITICAL: AI v2 system has import/dependency issues: {e}")
+                print("   This indicates circular imports or missing dependencies.")
+            else:
+                print(f"⚠️ AI v2 system initialization warning: {error_type}: {e}")
+                print("   System will attempt to run with degraded functionality.")
+            
+            # Check what actually got initialized
+            if not hasattr(self, 'ai_v2_integrator') or not self.ai_v2_integrator:
+                self.ai_v2_integrator = None
+            if not hasattr(self, 'hero_selector') or not self.hero_selector:
+                self.hero_selector = None
+            if not hasattr(self, 'grandmaster_advisor') or not self.grandmaster_advisor:
+                self.grandmaster_advisor = None
+                
+            # Log component status for debugging
+            components = [('SystemIntegrator', self.ai_v2_integrator), 
+                         ('HeroSelector', self.hero_selector),
+                         ('GrandmasterAdvisor', self.grandmaster_advisor)]
+            for name, component in components:
+                status = "✅ Available" if component else "❌ Failed"
+                print(f"   • {name}: {status}")
     
     def init_settings_system(self):
         """Initialize the AI v2 settings system and conversational coach."""
@@ -1495,6 +1900,15 @@ class IntegratedArenaBotGUI:
             self.ui_queue.put((self.log_text, (f"\n🎮 GAME STATE: {old_state.value} → {new_state.value}",), {}))
             self.in_draft = (new_state.value == "Arena Draft")
             self.ui_queue.put((self.update_status, (f"Game State: {new_state.value}",), {}))
+            
+            # Stop Visual Sentry if leaving Arena Draft state
+            if old_state.value == "Arena Draft" and new_state.value != "Arena Draft":
+                self.ui_queue.put((self._stop_visual_sentry, (), {}))
+                def set_idle_state():
+                    old_bot_state = self.bot_state
+                    self.bot_state = 'IDLE'
+                    self._log_state_change(old_bot_state, 'IDLE', 'exited_arena_draft')
+                self.ui_queue.put((set_idle_state, (), {}))
 
         def on_draft_pick(pick):
             self.draft_picks_count += 1
@@ -1838,15 +2252,121 @@ class IntegratedArenaBotGUI:
         )
         log_frame.pack(fill='both', expand=True, padx=10, pady=5)
         
+        # Create notebook for log tabs
+        from tkinter import ttk
+        log_notebook = ttk.Notebook(log_frame)
+        log_notebook.pack(fill='both', expand=True, padx=5, pady=5)
+        
+        # Standard log tab
+        standard_log_frame = tk.Frame(log_notebook, bg='#1C1C1C')
+        log_notebook.add(standard_log_frame, text="📝 Standard Logs")
+        
         self.log_text_widget = scrolledtext.ScrolledText(
-            log_frame,
+            standard_log_frame,
             height=10,  # Reduced from 15 to make room for larger card images
             bg='#1C1C1C',
             fg='#ECF0F1',
             font=('Consolas', 9),
             wrap=tk.WORD
         )
-        self.log_text_widget.pack(fill='both', expand=True, padx=5, pady=5)
+        self.log_text_widget.pack(fill='both', expand=True, padx=2, pady=2)
+        
+        # Structured log viewer tab
+        structured_log_frame = tk.Frame(log_notebook, bg='#1C1C1C')
+        log_notebook.add(structured_log_frame, text="🔍 Structured Logs")
+        
+        # Control panel for structured logs
+        log_control_frame = tk.Frame(structured_log_frame, bg='#2C3E50')
+        log_control_frame.pack(fill='x', padx=5, pady=5)
+        
+        # Log level filter
+        tk.Label(
+            log_control_frame,
+            text="Filter Level:",
+            bg='#2C3E50',
+            fg='#ECF0F1',
+            font=('Arial', 9)
+        ).pack(side='left', padx=5)
+        
+        self.log_level_filter = tk.StringVar(value="ALL")
+        log_level_combo = ttk.Combobox(
+            log_control_frame,
+            textvariable=self.log_level_filter,
+            values=["ALL", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+            state="readonly",
+            width=10
+        )
+        log_level_combo.pack(side='left', padx=5)
+        log_level_combo.bind('<<ComboboxSelected>>', self._filter_structured_logs)
+        
+        # Request ID filter
+        tk.Label(
+            log_control_frame,
+            text="Request ID:",
+            bg='#2C3E50',
+            fg='#ECF0F1',
+            font=('Arial', 9)
+        ).pack(side='left', padx=(20, 5))
+        
+        self.request_id_filter = tk.StringVar()
+        request_id_entry = tk.Entry(
+            log_control_frame,
+            textvariable=self.request_id_filter,
+            width=12,
+            font=('Consolas', 8)
+        )
+        request_id_entry.pack(side='left', padx=5)
+        request_id_entry.bind('<KeyRelease>', self._filter_structured_logs)
+        
+        # Clear logs button
+        clear_btn = tk.Button(
+            log_control_frame,
+            text="🗑️ Clear",
+            command=self._clear_structured_logs,
+            bg='#E74C3C',
+            fg='white',
+            font=('Arial', 8),
+            relief='raised',
+            bd=2
+        )
+        clear_btn.pack(side='right', padx=5)
+        
+        # Export logs button
+        export_btn = tk.Button(
+            log_control_frame,
+            text="💾 Export",
+            command=self._export_structured_logs,
+            bg='#27AE60',
+            fg='white',
+            font=('Arial', 8),
+            relief='raised',
+            bd=2
+        )
+        export_btn.pack(side='right', padx=5)
+        
+        # Structured log display
+        self.structured_log_widget = scrolledtext.ScrolledText(
+            structured_log_frame,
+            height=10,
+            bg='#0D1117',  # GitHub dark theme background
+            fg='#F0F6FC',  # Light text
+            font=('Consolas', 8),
+            wrap=tk.WORD
+        )
+        self.structured_log_widget.pack(fill='both', expand=True, padx=5, pady=5)
+        
+        # Configure text tags for colored output
+        self.structured_log_widget.tag_config("DEBUG", foreground="#8B949E")      # Gray
+        self.structured_log_widget.tag_config("INFO", foreground="#58A6FF")       # Blue  
+        self.structured_log_widget.tag_config("WARNING", foreground="#F85149")    # Orange/Red
+        self.structured_log_widget.tag_config("ERROR", foreground="#FF6B6B")      # Red
+        self.structured_log_widget.tag_config("CRITICAL", foreground="#FF1744")   # Bright Red
+        self.structured_log_widget.tag_config("REQUEST_ID", foreground="#A5A5A5", font=('Consolas', 7))  # Small gray
+        self.structured_log_widget.tag_config("TIMESTAMP", foreground="#6A9955")  # Green
+        self.structured_log_widget.tag_config("COMPONENT", foreground="#DCDCAA")  # Yellow
+        
+        # Store structured log entries for filtering
+        self.structured_log_entries = []
         
         # Card images area - made much larger to accommodate bigger images
         card_frame = tk.LabelFrame(
@@ -1866,6 +2386,7 @@ class IntegratedArenaBotGUI:
         self.card_image_labels = []
         self.card_name_labels = []
         self.card_correct_buttons = []  # Store references to correct buttons
+        self.card_image_refs = []  # Prevent PhotoImage garbage collection
         for i in range(3):
             card_container = tk.Frame(self.card_images_frame, bg='#34495E', relief='raised', bd=3)
             card_container.pack(side='left', padx=15, pady=15, fill='both', expand=True)
@@ -4022,6 +4543,11 @@ System Uptime: {system_health['system_uptime_hours']:.1f} hours"""
                             photo = ImageTk.PhotoImage(img)
                             self.card_image_labels[i].config(image=photo, text="")
                             self.card_image_labels[i].image = photo  # Keep a reference
+                            
+                            # Enhanced garbage collection prevention
+                            if len(self.card_image_refs) <= i:
+                                self.card_image_refs.extend([None] * (i + 1 - len(self.card_image_refs)))
+                            self.card_image_refs[i] = photo
                         except Exception as e:
                             self.parent_bot.log_text(f"⚠️ Image display failed: {e}")
             
@@ -4061,15 +4587,16 @@ System Uptime: {system_health['system_uptime_hours']:.1f} hours"""
     
     def manual_screenshot(self):
         """Take and analyze a manual screenshot with non-blocking threading."""
-        # Prevent multiple simultaneous analyses
-        if self.analysis_in_progress:
-            self.log_text("⚠️ Analysis already in progress, please wait...")
-            return
+        # FIXED: Use proper thread-safe locking to prevent race conditions
+        with self.analysis_lock:
+            if self.analysis_in_progress:
+                self.log_text("⚠️ Analysis already in progress, please wait...")
+                return
+            
+            # Atomically set the flag while holding the lock
+            self.analysis_in_progress = True
             
         self.log_text("📸 Taking screenshot for analysis...")
-        
-        # Update UI to show analysis is starting
-        self.analysis_in_progress = True
         self.screenshot_btn.config(state=tk.DISABLED)
         self.update_status("Analyzing... (First Ultimate Detection run may take several minutes)")
         
@@ -4105,20 +4632,29 @@ System Uptime: {system_health['system_uptime_hours']:.1f} hours"""
             
             if screenshot is not None:
                 # This is the potentially slow part - analyze the screenshot
-                analysis_result = self.analyze_screenshot_data(screenshot)
-                
-                # The analysis result now contains success, logs, and data
-                # Add screenshot capture log to the logs
-                if 'logs' in analysis_result:
-                    analysis_result['logs'].insert(0, "✅ Screenshot captured with PIL ImageGrab")
-                
-                # Put the result in the queue for the main thread
-                self.result_queue.put({
-                    'success': analysis_result.get('success', False),
-                    'result': analysis_result,
-                    'logs': analysis_result.get('logs', []),
-                    'error': analysis_result.get('error', None)
-                })
+                try:
+                    analysis_result = self.analyze_screenshot_data(screenshot)
+                    
+                    # The analysis result now contains success, logs, and data
+                    # Add screenshot capture log to the logs
+                    if 'logs' in analysis_result:
+                        analysis_result['logs'].insert(0, "✅ Screenshot captured with PIL ImageGrab")
+                    
+                    # Put the result in the queue for the main thread
+                    self.result_queue.put({
+                        'success': analysis_result.get('success', False),
+                        'result': analysis_result,
+                        'logs': analysis_result.get('logs', []),
+                        'error': analysis_result.get('error', None)
+                    })
+                except Exception as analysis_e:
+                    # Critical: prevent analysis errors from crashing GUI
+                    error_msg = f"Analysis thread error: {analysis_e}"
+                    self.result_queue.put({
+                        'success': False,
+                        'error': error_msg,
+                        'logs': [f"❌ {error_msg}"]
+                    })
             else:
                 self.result_queue.put({
                     'success': False,
@@ -4149,16 +4685,32 @@ System Uptime: {system_health['system_uptime_hours']:.1f} hours"""
                 if result:
                     self.last_full_analysis_result = result
                     self.show_analysis_result(result)
-                    # --- FIX: Update the overlay with the results ---
+                    # --- FIXED: Defensive overlay update with data validation ---
                     if self.overlay:
-                        self.overlay.optimized_update_display(result)
+                        try:
+                            # Validate result has required data before passing to overlay  
+                            if self._validate_analysis_result_for_overlay(result):
+                                self.overlay.update_display(result, 'CARD_PICK_MODE')
+                                self.log_text("✅ Overlay updated with analysis results")
+                            else:
+                                self.log_text("⚠️ Analysis result incomplete, overlay not updated")
+                        except Exception as e:
+                            self.log_text(f"⚠️ Error updating overlay: {e}")
                 else:
                     self.log_text("❌ Analysis returned no result.")
             else:
                 error = queue_result.get('error', 'Unknown error')
                 self.log_text(f"❌ Analysis failed: {error}")
+                # Clear overlay on analysis failure to prevent stale data
+                if self.overlay:
+                    try:
+                        self.overlay.update_display({}, 'CARD_PICK_MODE')
+                    except Exception:
+                        pass  # Ignore overlay errors during error handling
             
-            self.analysis_in_progress = False
+            # FIXED: Thread-safe flag reset
+            with self.analysis_lock:
+                self.analysis_in_progress = False
             self.screenshot_btn.config(state=tk.NORMAL)
             self.update_status("Analysis complete. Ready for next screenshot.")
             self.progress_bar.stop()
@@ -4252,132 +4804,396 @@ System Uptime: {system_health['system_uptime_hours']:.1f} hours"""
         finally:
             self.cache_build_in_progress = False
     
+    def is_active_draft_screen(self, screenshot: np.ndarray) -> bool:
+        """
+        CRITICAL GATEKEEPER FUNCTION: Visual confirmation that we're on the active draft screen.
+        
+        This function acts as the final gatekeeper before triggering card analysis.
+        It must return True only if it's highly confident we're seeing the actual 
+        card selection screen with three cards, not the Arena Hub.
+        
+        Args:
+            screenshot: Current screenshot to analyze
+            
+        Returns:
+            True only if visually confirmed to be on active draft screen
+        """
+        try:
+            if screenshot is None or screenshot.size == 0:
+                self.log_text("   ❌ Invalid screenshot for draft screen validation")
+                return False
+            
+            height, width = screenshot.shape[:2]
+            self.log_text(f"   🔍 Validating draft screen for {width}×{height} screenshot")
+            
+            # Check 1: Look for three distinct card-shaped contours in central area
+            # Convert to grayscale and find contours
+            gray = cv2.cvtColor(screenshot, cv2.COLOR_BGR2GRAY)
+            edges = cv2.Canny(gray, 50, 150)
+            
+            # Focus on central region where cards should be (avoid UI elements on edges)
+            central_y_start = int(height * 0.1)
+            central_y_end = int(height * 0.9)
+            central_x_start = int(width * 0.2)
+            central_x_end = int(width * 0.8)
+            
+            central_edges = edges[central_y_start:central_y_end, central_x_start:central_x_end]
+            contours, _ = cv2.findContours(central_edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            # Look for card-shaped contours (portrait aspect ratio, reasonable size)
+            card_contours = []
+            for contour in contours:
+                x, y, w, h = cv2.boundingRect(contour)
+                area = cv2.contourArea(contour)
+                
+                # Card validation criteria
+                if (200 < w < 600 and 300 < h < 800 and  # Reasonable card size
+                    0.6 < w/h < 0.8 and  # Portrait aspect ratio
+                    area > 50000):  # Minimum area threshold
+                    card_contours.append((x, y, w, h))
+            
+            # Must find at least 2-3 card-like shapes for active draft screen
+            if len(card_contours) < 2:
+                self.log_text(f"   ❌ Found only {len(card_contours)} card-like shapes, need ≥2")
+                return False
+            
+            # Check 2: Look for absence of "Draft New Cards" button using OCR
+            # Sample key areas where the button would appear (top portion of screen)
+            button_search_region = screenshot[0:int(height*0.4), 0:width]
+            
+            try:
+                # Convert to better format for text detection
+                button_gray = cv2.cvtColor(button_search_region, cv2.COLOR_BGR2GRAY)
+                
+                # Simple text pattern detection for "Draft" or "New Cards" 
+                # (More reliable than full OCR for this specific use case)
+                
+                # Look for button-like regions with specific colors
+                # "Draft New Cards" button typically has distinct background
+                hsv_button = cv2.cvtColor(button_search_region, cv2.COLOR_BGR2HSV)
+                
+                # Look for button-like color ranges (browns/yellows common in Hearthstone UI)
+                button_mask1 = cv2.inRange(hsv_button, np.array([10, 50, 100]), np.array([30, 255, 255]))
+                button_mask2 = cv2.inRange(hsv_button, np.array([15, 100, 150]), np.array([35, 255, 255]))
+                button_mask = cv2.bitwise_or(button_mask1, button_mask2)
+                
+                # Find large rectangular regions that could be buttons
+                button_contours, _ = cv2.findContours(button_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                large_button_regions = 0
+                
+                for contour in button_contours:
+                    x, y, w, h = cv2.boundingRect(contour)
+                    area = cv2.contourArea(contour)
+                    
+                    # Look for large rectangular regions (potential buttons)
+                    if (w > 150 and h > 40 and  # Large enough to be a button
+                        1.5 < w/h < 6.0 and  # Button-like aspect ratio
+                        area > 8000):  # Substantial area
+                        large_button_regions += 1
+                
+                # If we find multiple large button-like regions, we're likely on Arena Hub
+                if large_button_regions >= 2:
+                    self.log_text(f"   ❌ Found {large_button_regions} button-like regions, likely Arena Hub")
+                    return False
+                    
+            except Exception as e:
+                self.log_text(f"   ⚠️ Button detection failed: {e}, proceeding with contour-only validation")
+            
+            # Check 3: Validate card spacing and positioning
+            # Cards should be roughly horizontally aligned and evenly spaced
+            if len(card_contours) >= 2:
+                # Sort by x position
+                card_contours.sort(key=lambda c: c[0])
+                
+                # Check horizontal alignment (y positions should be similar)
+                avg_y = sum(c[1] for c in card_contours) / len(card_contours)
+                alignment_threshold = height * 0.1  # Allow 10% height variation
+                
+                well_aligned = all(abs(c[1] - avg_y) < alignment_threshold for c in card_contours)
+                
+                if not well_aligned:
+                    self.log_text("   ❌ Card shapes not well aligned horizontally")
+                    return False
+                
+                # Check reasonable spacing between cards
+                if len(card_contours) >= 2:
+                    spacing = []
+                    for i in range(len(card_contours) - 1):
+                        gap = card_contours[i+1][0] - (card_contours[i][0] + card_contours[i][2])
+                        spacing.append(gap)
+                    
+                    avg_spacing = sum(spacing) / len(spacing)
+                    # Spacing should be reasonable (not too close, not too far)
+                    if not (20 < avg_spacing < 400):
+                        self.log_text(f"   ❌ Card spacing suspicious: {avg_spacing:.1f}px")
+                        return False
+            
+            # All checks passed!
+            self.log_text(f"   ✅ Active draft screen confirmed: {len(card_contours)} cards detected")
+            self.log_text("   ✅ No conflicting UI elements found")
+            return True
+            
+        except Exception as e:
+            self.log_text(f"   ❌ Draft screen validation error: {e}")
+            return False
+    
+    @log_performance(threshold_ms=5000.0)  # 5 second threshold for analysis
     def analyze_screenshot_data(self, screenshot):
         """
         Analyzes screenshot data in a thread-safe way, returning results and logs.
         This method is designed to be run in a background thread.
         """
-        logs = []
-        if screenshot is None:
-            return {'success': False, 'error': 'Screenshot capture failed.', 'logs': logs}
-
-        height, width = screenshot.shape[:2]
-        resolution_str = f"{width}x{height}"
-        logs.append(f"🔍 Analyzing screenshot: {resolution_str}")
-
-        # --- DEBUG LOGGING BLOCK ---
-        if is_debug_enabled():
-            logs.append(f"🐛 DEBUG: Debug mode is active.")
-            if self.use_custom_coords.get() and self.custom_coordinates:
-                logs.append(f"🐛 DEBUG: Using custom coordinates: {self.custom_coordinates}")
-            else:
-                logs.append(f"🐛 DEBUG: Using automatic coordinate detection.")
-            logs.append(f"🐛 DEBUG: Ultimate Detection toggle is {'ON' if self.use_ultimate_detection.get() else 'OFF'}.")
-        # --- END OF DEBUG LOGGING BLOCK ---
-
-        card_regions = None
-        
-        if self.smart_detector:
-            try:
-                smart_result = self.smart_detector.detect_cards_automatically(screenshot)
-                if smart_result and smart_result.get('success'):
-                    card_regions = smart_result.get('card_positions', [])
-                    logs.append(f"✅ Smart detector found {len(card_regions)} regions.")
-                else:
-                    logs.append("⚠️ Smart detector failed, using fallback.")
-            except Exception as e:
-                logs.append(f"⚠️ Smart detector error: {e}")
-        
-        if not card_regions:
-            logs.append("📐 Using resolution-based coordinate fallback.")
-            card_regions = [
-                (1100, 75, 250, 350), (1375, 75, 250, 350), (1650, 75, 250, 350)
-            ]
-
-        detected_cards = []
-        if self.histogram_matcher:
-            for i, (x, y, w, h) in enumerate(card_regions):
-                if (y + h <= height and x + w <= width and x >= 0 and y >= 0):
-                    card_region = screenshot[y:y+h, x:x+w]
-                    match = self.histogram_matcher.match_card(card_region)
-                    if match:
-                        # Save extracted card region to temporary file
-                        temp_image_path = None
-                        try:
-                            import tempfile
-                            import cv2
-                            temp_fd, temp_path = tempfile.mkstemp(suffix='.png', prefix=f'card_{i}_')
-                            os.close(temp_fd)  # Close file descriptor, we'll use the path
-                            cv2.imwrite(temp_path, card_region)
-                            temp_image_path = temp_path
-                            logs.append(f"   💾 Saved card {i+1} region to: {temp_path}")
-                        except Exception as e:
-                            logs.append(f"   ⚠️ Failed to save card {i+1} region: {e}")
-                        
-                        card_data = {
-                            'card_code': match.card_code,
-                            'card_name': self.get_card_name(match.card_code),
-                            'confidence': match.confidence,
-                            'region': (x,y,w,h)
-                        }
-                        
-                        # Add image path if successfully saved
-                        if temp_image_path:
-                            card_data['image_path'] = temp_image_path
-                            
-                        detected_cards.append(card_data)
-        
-        recommendation = None
-        ai_decision = None
-        
-        # Use new AI v2 GrandmasterAdvisor system
-        if hasattr(self, 'grandmaster_advisor') and self.grandmaster_advisor and len(detected_cards) >= 3:
-            card_codes = [c['card_code'] for c in detected_cards]
-            try:
-                # Create DeckState object for AI v2 system
-                from arena_bot.ai_v2.data_models import DeckState
-                deck_state = DeckState(
-                    hero_class=self.current_hero or 'NEUTRAL',
-                    drafted_cards=[],  # Empty for now - this would be populated in a real draft
-                    picks_made=0,
-                    wins=0,
-                    losses=0
+        # Create request context for full traceability
+        with RequestContext(operation_name="analyze_screenshot") as ctx:
+            logs = []
+            
+            # Log operation start with request ID
+            self.structured_logger.info(
+                "Starting screenshot analysis",
+                category=LogCategory.USER_INPUT,
+                request_id=ctx.request_id,
+                thread_name=threading.current_thread().name
+            )
+            
+            if screenshot is None:
+                self.structured_logger.error(
+                    "Screenshot capture failed - no image data",
+                    category=LogCategory.ERROR,
+                    request_id=ctx.request_id
                 )
-                
-                # Get AI v2 recommendation
-                ai_decision = self.grandmaster_advisor.get_recommendation(deck_state, card_codes)
-                
-                if ai_decision:
-                    logs.append(f"🤖 AI v2 recommendation: Card {ai_decision.recommended_pick_index + 1}")
-                    
-                    # Create legacy-compatible recommendation structure for backward compatibility
-                    recommendation = {
-                        'recommended_pick': ai_decision.recommended_pick_index + 1,
-                        'recommended_card': card_codes[ai_decision.recommended_pick_index] if ai_decision.recommended_pick_index < len(card_codes) else 'Unknown',
-                        'reasoning': ai_decision.comparative_explanation,
-                        'confidence': ai_decision.confidence_level,
-                        'card_details': ai_decision.all_offered_cards_analysis
-                    }
+                return {'success': False, 'error': 'Screenshot capture failed.', 'logs': logs}
+
+            height, width = screenshot.shape[:2]
+            resolution_str = f"{width}x{height}"
+            logs.append(f"🔍 Analyzing screenshot: {resolution_str}")
+            
+            # Log image metadata
+            self.structured_logger.info(
+                "Screenshot metadata captured",
+                category=LogCategory.DATA_PROCESSING,
+                width=width,
+                height=height,
+                resolution=resolution_str,
+                data_type=str(screenshot.dtype)
+            )
+
+            # --- DEBUG LOGGING BLOCK ---
+            if is_debug_enabled():
+                logs.append(f"🐛 DEBUG: Debug mode is active.")
+                self.structured_logger.debug(
+                    "Debug mode active - enhanced logging enabled",
+                    category=LogCategory.DEBUG,
+                    custom_coords_enabled=bool(self.use_custom_coords.get() and self.custom_coordinates),
+                    ultimate_detection_enabled=bool(self.use_ultimate_detection.get())
+                )
+                if self.use_custom_coords.get() and self.custom_coordinates:
+                    logs.append(f"🐛 DEBUG: Using custom coordinates: {self.custom_coordinates}")
                 else:
-                    logs.append("⚠️ AI v2 returned no recommendation")
-                    
-            except Exception as e:
-                logs.append(f"⚠️ AI v2 recommendation failed: {e}")
+                    logs.append(f"🐛 DEBUG: Using automatic coordinate detection.")
+                logs.append(f"🐛 DEBUG: Ultimate Detection toggle is {'ON' if self.use_ultimate_detection.get() else 'OFF'}.")
+            # --- END OF DEBUG LOGGING BLOCK ---
+
+            card_regions = None
+            
+            # Phase 1: Card Region Detection
+            with time_operation("card_region_detection", self.structured_logger):
+                if self.smart_detector:
+                    try:
+                        smart_result = self.smart_detector.detect_cards_automatically(screenshot)
+                        if smart_result and smart_result.get('success'):
+                            card_regions = smart_result.get('card_positions', [])
+                            logs.append(f"✅ Smart detector found {len(card_regions)} regions.")
+                            self.structured_logger.info(
+                                "Smart card detection successful",
+                                category=LogCategory.DATA_PROCESSING,
+                                regions_found=len(card_regions),
+                                detection_method="smart_detector"
+                            )
+                        else:
+                            logs.append("⚠️ Smart detector failed, using fallback.")
+                            self.structured_logger.warning(
+                                "Smart detector failed, falling back to coordinate detection",
+                                category=LogCategory.FALLBACK,
+                                smart_result=smart_result
+                            )
+                    except Exception as e:
+                        logs.append(f"⚠️ Smart detector error: {e}")
+                        log_complex_error(
+                            self.structured_logger,
+                            "Smart card detector execution",
+                            e,
+                            operation_data={"screenshot_shape": screenshot.shape}
+                        )
                 
-        # Fallback to legacy advisor if AI v2 fails or unavailable
-        elif self.advisor and len(detected_cards) >= 3:
-            card_codes = [c['card_code'] for c in detected_cards]
-            try:
-                choice = self.advisor.analyze_draft_choice(card_codes, self.current_hero or 'unknown')
-                recommendation = {
-                    'recommended_pick': choice.recommended_pick + 1,
-                    'recommended_card': choice.cards[choice.recommended_pick].card_code,
-                    'reasoning': choice.reasoning,
-                    'card_details': [vars(c) for c in choice.cards]
-                }
-                logs.append("⚠️ Using legacy AI advisor (AI v2 unavailable)")
-            except Exception as e:
-                logs.append(f"⚠️ Legacy AI recommendation failed: {e}")
+                if not card_regions:
+                    logs.append("📐 Using resolution-based coordinate fallback.")
+                    card_regions = [
+                        (1100, 75, 250, 350), (1375, 75, 250, 350), (1650, 75, 250, 350)
+                    ]
+                    self.structured_logger.info(
+                        "Using fallback coordinate detection",
+                        category=LogCategory.FALLBACK,
+                        fallback_regions=card_regions,
+                        fallback_reason="smart_detector_unavailable_or_failed"
+                    )
+
+            # Phase 2: Card Identification
+            detected_cards = []
+            with time_operation("card_identification", self.structured_logger):
+                if self.histogram_matcher:
+                    for i, (x, y, w, h) in enumerate(card_regions):
+                        if (y + h <= height and x + w <= width and x >= 0 and y >= 0):
+                            card_region = screenshot[y:y+h, x:x+w]
+                            
+                            # Log individual card processing
+                            with time_operation(f"card_match_{i+1}", self.structured_logger):
+                                match = self.histogram_matcher.match_card(card_region)
+                                if match:
+                                    card_data = {
+                                        'card_code': match.card_code,
+                                        'card_name': self.get_card_name(match.card_code),
+                                        'confidence': match.confidence,
+                                        'region': (x,y,w,h)
+                                    }
+                                    
+                                    detected_cards.append(card_data)
+                                    logs.append(f"   ✅ Card {i+1} detected: {card_data['card_name']} (confidence: {match.confidence:.3f})")
+                                    
+                                    self.structured_logger.info(
+                                        f"Card {i+1} identified successfully",
+                                        category=LogCategory.DATA_PROCESSING,
+                                        card_position=i+1,
+                                        card_code=match.card_code,
+                                        card_name=card_data['card_name'],
+                                        confidence=match.confidence,
+                                        region=card_data['region']
+                                    )
+                                else:
+                                    self.structured_logger.warning(
+                                        f"Card {i+1} identification failed",
+                                        category=LogCategory.DATA_PROCESSING,
+                                        card_position=i+1,
+                                        region=(x,y,w,h)
+                                    )
+                else:
+                    self.structured_logger.error(
+                        "Histogram matcher not available for card identification",
+                        category=LogCategory.ERROR,
+                        component="histogram_matcher"
+                    )
+            
+            self.structured_logger.info(
+                "Card identification phase completed",
+                category=LogCategory.DATA_PROCESSING,
+                total_cards_detected=len(detected_cards),
+                detection_success_rate=f"{len(detected_cards)/len(card_regions)*100:.1f}%" if card_regions else "0%"
+            )
+            
+            recommendation = None
+            ai_decision = None
+        
+            # Phase 3: AI Analysis & Recommendation  
+            if hasattr(self, 'grandmaster_advisor') and self.grandmaster_advisor and len(detected_cards) >= 3:
+                card_codes = [c['card_code'] for c in detected_cards]
+                
+                with time_operation("ai_recommendation", self.structured_logger):
+                    try:
+                        # Create DeckState object for AI v2 system
+                        from arena_bot.ai_v2.data_models import DeckState
+                        deck_state = DeckState(
+                            hero_class=self.current_hero or 'NEUTRAL',
+                            archetype='MIDRANGE',  # Default archetype
+                            drafted_cards=[],  # Empty for now - this would be populated in a real draft
+                            pick_number=getattr(self, 'draft_picks_count', 0) + 1
+                        )
+                        
+                        self.structured_logger.info(
+                            "Starting AI v2 recommendation analysis",
+                            category=LogCategory.API_CALL,
+                            input_cards=card_codes,
+                            hero_class=deck_state.hero_class,
+                            pick_number=deck_state.pick_number
+                        )
+                        
+                        # Get AI v2 recommendation with timeout protection
+                        ai_decision = self._run_detection_with_timeout(
+                            lambda: self.grandmaster_advisor.get_recommendation(deck_state, card_codes),
+                            timeout_seconds=5.0,  # 5 second timeout for AI operations
+                            method_name="AI v2 recommendation"
+                        )
+                        
+                        if ai_decision:
+                            logs.append(f"🤖 AI v2 recommendation: Card {ai_decision.recommended_pick_index + 1}")
+                            
+                            # Create legacy-compatible recommendation structure for backward compatibility
+                            recommendation = {
+                                'recommended_pick': ai_decision.recommended_pick_index + 1,
+                                'recommended_card': card_codes[ai_decision.recommended_pick_index] if ai_decision.recommended_pick_index < len(card_codes) else 'Unknown',
+                                'reasoning': ai_decision.comparative_explanation,
+                                'confidence': ai_decision.confidence_level,
+                                'card_details': ai_decision.all_offered_cards_analysis
+                            }
+                            
+                            self.structured_logger.info(
+                                "AI v2 recommendation completed successfully",
+                                category=LogCategory.API_CALL,
+                                recommended_pick=ai_decision.recommended_pick_index + 1,
+                                recommended_card=recommendation['recommended_card'],
+                                confidence_level=ai_decision.confidence_level,
+                                reasoning_length=len(ai_decision.comparative_explanation)
+                            )
+                        else:
+                            logs.append("⚠️ AI v2 returned no recommendation")
+                            self.structured_logger.warning(
+                                "AI v2 recommendation returned empty result",
+                                category=LogCategory.API_CALL,
+                                timeout_occurred=True
+                            )
+                            
+                    except Exception as e:
+                        logs.append(f"⚠️ AI v2 recommendation failed: {e}")
+                        log_complex_error(
+                            self.structured_logger,
+                            "AI v2 recommendation generation",
+                            e,
+                            operation_data={
+                                "card_codes": card_codes,
+                                "hero_class": self.current_hero,
+                                "pick_number": getattr(self, 'draft_picks_count', 0) + 1
+                            }
+                        )
+                    else:
+                        self.structured_logger.warning(
+                            "AI v2 recommendation skipped - insufficient data or unavailable",
+                            category=LogCategory.FALLBACK,
+                            has_grandmaster_advisor=hasattr(self, 'grandmaster_advisor'),
+                            advisor_available=bool(getattr(self, 'grandmaster_advisor', None)),
+                            detected_cards_count=len(detected_cards),
+                            minimum_required=3
+                        )
+            
+            # Fallback to legacy advisor if AI v2 fails or unavailable
+            elif self.advisor and len(detected_cards) >= 3:
+                card_codes = [c['card_code'] for c in detected_cards]
+                try:
+                    choice = self._run_detection_with_timeout(
+                        lambda: self.advisor.analyze_draft_choice(card_codes, self.current_hero or 'unknown'),
+                        timeout_seconds=3.0,  # 3 second timeout for legacy advisor
+                        method_name="Legacy AI advisor"
+                    )
+                    
+                    if choice:  # Check if timeout didn't occur
+                        recommendation = {
+                            'recommended_pick': choice.recommended_pick + 1,
+                            'recommended_card': choice.cards[choice.recommended_pick].card_code,
+                            'reasoning': choice.reasoning,
+                            'card_details': [vars(c) for c in choice.cards]
+                        }
+                    else:
+                        logs.append("⚠️ Legacy AI advisor timeout/error")
+                    logs.append("⚠️ Using legacy AI advisor (AI v2 unavailable)")
+                except Exception as e:
+                    logs.append(f"⚠️ Legacy AI recommendation failed: {e}")
 
         # Visual debugging if enabled
         if is_debug_enabled() and card_regions:
@@ -4415,16 +5231,30 @@ System Uptime: {system_health['system_uptime_hours']:.1f} hours"""
             except Exception as e:
                 logs.append(f"⚠️ Debug visualization failed: {e}")
 
-        return {
-            'success': len(detected_cards) > 0,
-            'detected_cards': detected_cards,
-            'recommendation': recommendation,
-            'ai_decision': ai_decision,  # Include AI v2 decision object
-            'logs': logs
-        }
+            # Final Result Logging
+            analysis_success = len(detected_cards) > 0
+            result = {
+                'success': analysis_success,
+                'detected_cards': detected_cards,
+                'recommendation': recommendation,
+                'ai_decision': ai_decision,  # Include AI v2 decision object
+                'logs': logs
+            }
+            
+            self.structured_logger.info(
+                "Screenshot analysis completed",
+                category=LogCategory.DATA_PROCESSING,
+                analysis_success=analysis_success,
+                cards_detected=len(detected_cards),
+                recommendation_available=bool(recommendation),
+                ai_decision_available=bool(ai_decision),
+                total_log_entries=len(logs)
+            )
+            
+            return result
     
     def update_card_images(self, detected_cards):
-        """Update the card images in the GUI."""
+        """Update the card images in the GUI using high-quality asset library images."""
         for i in range(3):
             if i < len(detected_cards):
                 card = detected_cards[i]
@@ -4437,19 +5267,47 @@ System Uptime: {system_health['system_uptime_hours']:.1f} hours"""
                 confidence_threshold = 0.15  # Minimum confidence for displaying card images
                 
                 if (card['confidence'] >= confidence_threshold and 
-                    'image_path' in card and os.path.exists(card['image_path']) and 
+                    'card_code' in card and card['card_code'] != 'Unknown' and 
                     card['card_name'] != "Unknown"):
                     try:
-                        # Load and resize image to much larger size for better visibility
-                        img = Image.open(card['image_path'])
-                        # Make image significantly larger - actual card-like size
-                        img = img.resize((400, 280), Image.Resampling.LANCZOS)
-                        photo = ImageTk.PhotoImage(img)
+                        # Get card code and premium status
+                        card_code = card['card_code']
+                        is_premium = card.get('is_premium', False) or '_premium' in card_code
+                        base_code = card_code.replace('_premium', '')
                         
-                        # Update image label
-                        self.card_image_labels[i].config(image=photo, text="")
-                        self.card_image_labels[i].image = photo  # Keep a reference
-                        self.log_text(f"   📷 Loaded card image: {card['image_path']}")
+                        # Use asset loader to get the correct image path
+                        if hasattr(self, 'asset_loader') and self.asset_loader:
+                            card_image_path = self.asset_loader.get_card_image_path(base_code, premium=is_premium)
+                            
+                            if card_image_path.exists():
+                                # Load high-quality image using PIL
+                                img = Image.open(card_image_path)
+                                # Resize for UI display while maintaining aspect ratio
+                                img = img.resize((200, 280), Image.Resampling.LANCZOS)
+                                photo = ImageTk.PhotoImage(img)
+                                
+                                # Update image label and fix garbage collection bug
+                                self.card_image_labels[i].config(image=photo, text="")
+                                self.card_image_labels[i].image = photo  # CRITICAL: prevents garbage collection
+                                
+                                # Store additional reference for extra safety
+                                if len(self.card_image_refs) <= i:
+                                    self.card_image_refs.extend([None] * (i + 1 - len(self.card_image_refs)))
+                                self.card_image_refs[i] = photo
+                                
+                                premium_text = " ✨" if is_premium else ""
+                                self.log_text(f"   📷 Loaded high-quality card image: {card['card_name']}{premium_text}")
+                            else:
+                                # Asset not found - show placeholder
+                                placeholder_text = f"High-Quality Asset\nNot Found\n{base_code}"
+                                self.card_image_labels[i].config(image="", text=placeholder_text)
+                                self.log_text(f"   ⚠️ Asset not found: {card_image_path}")
+                        else:
+                            # Asset loader not available
+                            placeholder_text = "Asset Loader\nNot Available"
+                            self.card_image_labels[i].config(image="", text=placeholder_text)
+                            self.log_text(f"   ⚠️ Asset loader not available for card display")
+                            
                     except Exception as e:
                         error_msg = f"Image Error:\n{str(e)[:50]}"
                         self.card_image_labels[i].config(image="", text=error_msg)
@@ -4460,20 +5318,20 @@ System Uptime: {system_health['system_uptime_hours']:.1f} hours"""
                         placeholder_text = f"Detection Failed\nLow Confidence\n({card['confidence']:.3f})"
                         self.card_image_labels[i].config(image="", text=placeholder_text)
                         self.log_text(f"   ⚠️ Card {i+1} confidence too low for display: {card['confidence']:.3f}")
-                    elif card['card_name'] == "Unknown":
+                    elif card.get('card_code') == 'Unknown' or card['card_name'] == "Unknown":
                         placeholder_text = "Detection Failed\nUnknown Card"
                         self.card_image_labels[i].config(image="", text=placeholder_text)
                         self.log_text(f"   ⚠️ Card {i+1} unknown card, not displaying")
                     else:
-                        self.card_image_labels[i].config(image="", text="No Image\nFound")
-                        if 'image_path' in card:
-                            self.log_text(f"   ⚠️ Image file missing: {card.get('image_path', 'No path')}")
-                        else:
-                            self.log_text(f"   ⚠️ No image path in card data")
+                        self.card_image_labels[i].config(image="", text="No Card Code\nFound")
+                        self.log_text(f"   ⚠️ No card_code in card data for card {i+1}")
             else:
-                # Clear unused card slots
+                # Clear unused card slots and their image references
                 self.card_name_labels[i].config(text=f"Card {i+1}: Waiting...")
                 self.card_image_labels[i].config(image="", text="No Image")
+                # Clear the image reference to prevent memory leaks
+                if hasattr(self, 'card_image_refs') and i < len(self.card_image_refs):
+                    self.card_image_refs[i] = None
     
     def show_analysis_result(self, result):
         """Enhanced analysis result display with hero context and AI v2 integration."""
@@ -4547,7 +5405,8 @@ System Uptime: {system_health['system_uptime_hours']:.1f} hours"""
             
             # Use AI v2 detailed analysis if available, otherwise fall back to legacy
             card_analyses = recommendation['card_details']
-            if ai_decision and hasattr(ai_decision, 'all_offered_cards_analysis'):
+            if (ai_decision and hasattr(ai_decision, 'all_offered_cards_analysis') 
+                and ai_decision.all_offered_cards_analysis and isinstance(ai_decision.all_offered_cards_analysis, list)):
                 card_analyses = ai_decision.all_offered_cards_analysis
             
             for i, card_detail in enumerate(card_analyses):
@@ -4613,11 +5472,18 @@ System Uptime: {system_health['system_uptime_hours']:.1f} hours"""
             )
             
             self.log_text("🎯 Generating AI v2 fallback recommendation...")
-            ai_decision = self.ai_v2_integrator.get_ai_decision_with_recovery(deck_state, card_ids)
+            ai_decision = self._run_detection_with_timeout(
+                lambda: self.ai_v2_integrator.get_ai_decision_with_recovery(deck_state, card_ids),
+                timeout_seconds=7.0,  # 7 second timeout for AI v2 fallback
+                method_name="AI v2 fallback"
+            )
             
             # Convert AI v2 decision to legacy format for display
-            legacy_recommendation = self._convert_ai_v2_to_legacy(ai_decision, detected_cards)
-            self._show_enhanced_recommendation(legacy_recommendation, detected_cards)
+            if ai_decision:  # Check if timeout didn't occur
+                legacy_recommendation = self._convert_ai_v2_to_legacy(ai_decision, detected_cards)
+                self._show_enhanced_recommendation(legacy_recommendation, detected_cards)
+            else:
+                self.log_text("⚠️ AI v2 fallback timeout/error - no recommendation available")
             
         except Exception as e:
             self.log_text(f"⚠️ AI v2 fallback failed: {e}")
@@ -4626,23 +5492,60 @@ System Uptime: {system_health['system_uptime_hours']:.1f} hours"""
     def _convert_ai_v2_to_legacy(self, ai_decision, detected_cards):
         """Convert AI v2 decision format to legacy recommendation format."""
         try:
+            # Validate ai_decision structure
+            if not ai_decision or not hasattr(ai_decision, 'recommended_pick_index'):
+                self.log_text("⚠️ Invalid ai_decision structure: missing recommended_pick_index")
+                return None
+                
+            if not hasattr(ai_decision, 'all_offered_cards_analysis') or not ai_decision.all_offered_cards_analysis:
+                self.log_text("⚠️ Invalid ai_decision structure: missing or empty all_offered_cards_analysis")
+                return None
+            
             recommended_index = ai_decision.recommended_pick_index
-            recommended_card = detected_cards[recommended_index].get('card_code', '')
+            
+            # Validate recommended_index bounds
+            if recommended_index < 0 or recommended_index >= len(detected_cards):
+                self.log_text(f"⚠️ Invalid recommended_index {recommended_index} for {len(detected_cards)} cards")
+                return None
+                
+            recommended_card = detected_cards[recommended_index].get('card_code', '') if detected_cards[recommended_index] else ''
             
             card_details = []
             for i, card in enumerate(detected_cards):
-                card_analysis = ai_decision.all_offered_cards_analysis[i] if i < len(ai_decision.all_offered_cards_analysis) else {}
+                if not card:
+                    continue
+                    
+                # Safe access to card analysis with validation
+                card_analysis = {}
+                if i < len(ai_decision.all_offered_cards_analysis) and ai_decision.all_offered_cards_analysis[i]:
+                    card_analysis = ai_decision.all_offered_cards_analysis[i]
+                
+                # Extract win_rate with defensive programming
+                win_rate = 0.5  # default fallback
+                if isinstance(card_analysis, dict):
+                    scores = card_analysis.get('scores')
+                    if isinstance(scores, dict):
+                        final_score = scores.get('final_score')
+                        if isinstance(final_score, (int, float)) and 0 <= final_score <= 1:
+                            win_rate = final_score
+                        else:
+                            self.log_text(f"⚠️ Invalid final_score for card {i}: {final_score}")
                 
                 card_details.append({
                     'card_code': card.get('card_code', ''),
                     'tier_letter': 'AI',  # AI v2 doesn't use tier letters
-                    'win_rate': card_analysis.get('scores', {}).get('final_score', 0.5)
+                    'win_rate': win_rate
                 })
+            
+            # Validate required fields before returning
+            comparative_explanation = getattr(ai_decision, 'comparative_explanation', 'No explanation available')
+            if not isinstance(comparative_explanation, str):
+                comparative_explanation = str(comparative_explanation) if comparative_explanation else 'No explanation available'
             
             return {
                 'recommended_card': recommended_card,
                 'recommended_pick': recommended_index + 1,
-                'reasoning': ai_decision.comparative_explanation,
+                'reasoning': comparative_explanation,
                 'card_details': card_details
             }
             
@@ -5936,6 +6839,13 @@ System Uptime: {system_health['system_uptime_hours']:.1f} hours"""
     def stop(self):
         """Stop the bot."""
         self.running = False
+        
+        # Stop Visual Sentry system if running
+        self._stop_visual_sentry()
+        old_state = self.bot_state
+        self.bot_state = 'IDLE'
+        self._log_state_change(old_state, 'IDLE', 'application_shutdown')
+        
         if self.log_monitor:
             self.log_monitor.stop_monitoring()
         if hasattr(self, 'root'):
@@ -5957,18 +6867,31 @@ System Uptime: {system_health['system_uptime_hours']:.1f} hours"""
             
             # Get AI v2 hero recommendation
             self.log_text("🎯 Analyzing hero options with AI v2...")
-            hero_recommendation = self.ai_v2_integrator.get_hero_recommendation_with_recovery(hero_classes)
+            hero_recommendation = self._run_detection_with_timeout(
+                lambda: self.ai_v2_integrator.get_hero_recommendation_with_recovery(hero_classes),
+                timeout_seconds=4.0,  # 4 second timeout for hero recommendations
+                method_name="AI v2 hero recommendation"
+            )
             
-            # Display hero selection UI
-            self._display_hero_selection_ui(hero_recommendation)
-            
-            # Log recommendation details
-            recommended_hero = hero_recommendation.hero_classes[hero_recommendation.recommended_hero_index]
-            confidence = hero_recommendation.confidence_level
+            # Display hero selection UI and log details
+            if hero_recommendation:  # Check if timeout didn't occur
+                self._display_hero_selection_ui(hero_recommendation)
+                
+                # Log recommendation details
+                recommended_hero = hero_recommendation.hero_classes[hero_recommendation.recommended_hero_index]
+                confidence = hero_recommendation.confidence_level
+            else:
+                self.log_text("⚠️ AI v2 hero recommendation timeout/error - using default")
+                # Set fallback values for logging
+                recommended_hero = "Unknown"
+                confidence = 0.0
             
             self.log_text(f"🎯 AI v2 HERO RECOMMENDATION:")
             self.log_text(f"   Recommended: {recommended_hero} ({confidence:.1%} confidence)")
-            self.log_text(f"   Explanation: {hero_recommendation.explanation}")
+            if hero_recommendation:
+                self.log_text(f"   Explanation: {hero_recommendation.explanation}")
+            else:
+                self.log_text(f"   Explanation: Timeout/error occurred during recommendation")
             
         except Exception as e:
             self.log_text(f"❌ Hero selection error: {e}")
@@ -5991,21 +6914,39 @@ System Uptime: {system_health['system_uptime_hours']:.1f} hours"""
             
             # Get AI v2 hero recommendation with enhanced error recovery
             self.log_text("🎯 Analyzing hero options with AI v2 (enhanced)...")
-            hero_recommendation = self.ai_v2_integrator.get_hero_recommendation_with_recovery(hero_classes)
+            hero_recommendation = self._run_detection_with_timeout(
+                lambda: self.ai_v2_integrator.get_hero_recommendation_with_recovery(hero_classes),
+                timeout_seconds=4.0,  # 4 second timeout for hero recommendations
+                method_name="AI v2 hero recommendation (enhanced)"
+            )
             
             # Store recommendation for later use
-            self.hero_recommendation = hero_recommendation
+            if hero_recommendation:  # Check if timeout didn't occur
+                self.hero_recommendation = hero_recommendation
+            else:
+                self.log_text("⚠️ AI v2 hero recommendation (enhanced) timeout/error")
+                self.hero_recommendation = None
             
             # Display enhanced hero selection UI
-            self._display_hero_selection_ui(hero_recommendation)
+            if hero_recommendation:  # Check if timeout didn't occur
+                self._display_hero_selection_ui(hero_recommendation)
+                
+                # --- FIX: Update the overlay with hero selection ---
+                if self.overlay:
+                    self.overlay.update_display(hero_recommendation, 'HERO_SELECTION_MODE')
             
             # Log detailed recommendation
-            recommended_hero = hero_recommendation.hero_classes[hero_recommendation.recommended_hero_index]
-            confidence = hero_recommendation.confidence_level
-            
-            self.log_text(f"🎯 AI v2 ENHANCED HERO RECOMMENDATION:")
-            self.log_text(f"   Recommended: {recommended_hero} ({confidence:.1%} confidence)")
-            self.log_text(f"   Explanation: {hero_recommendation.explanation}")
+            if hero_recommendation:
+                recommended_hero = hero_recommendation.hero_classes[hero_recommendation.recommended_hero_index]
+                confidence = hero_recommendation.confidence_level
+                
+                self.log_text(f"🎯 AI v2 ENHANCED HERO RECOMMENDATION:")
+                self.log_text(f"   Recommended: {recommended_hero} ({confidence:.1%} confidence)")
+                self.log_text(f"   Explanation: {hero_recommendation.explanation}")
+            else:
+                self.log_text(f"🎯 AI v2 ENHANCED HERO RECOMMENDATION:")
+                self.log_text(f"   Recommended: None (timeout/error)")
+                self.log_text(f"   Explanation: Hero recommendation failed due to timeout or error")
             
             # Show system health for transparency
             self._show_system_health()
@@ -6023,6 +6964,10 @@ System Uptime: {system_health['system_uptime_hours']:.1f} hours"""
         try:
             # Store recommended hero for context
             self.selected_hero_class = recommended_hero
+            
+            # --- FIX: Set selected hero in overlay ---
+            if self.overlay:
+                self.overlay.set_selected_hero(recommended_hero)
             
             # Initialize hero-aware card evaluation context
             if hasattr(self, 'grandmaster_advisor') and self.grandmaster_advisor:
@@ -7479,6 +8424,49 @@ class CoordinateSelector:
             
         except Exception as e:
             return f"Error loading correction history: {e}"
+
+    def _validate_analysis_result_for_overlay(self, result):
+        """
+        Validate that analysis result has minimum required data for overlay display.
+        
+        Args:
+            result: Analysis result dictionary
+            
+        Returns:
+            bool: True if result is valid for overlay display
+        """
+        try:
+            if not isinstance(result, dict):
+                return False
+            
+            # Check for basic success indicator
+            if not result.get('success', False):
+                return False
+            
+            # For card pick mode, check for required fields
+            required_fields = ['recommended_card', 'card_details', 'recommended_pick']
+            for field in required_fields:
+                if field not in result:
+                    self.log_text(f"⚠️ Missing required field for overlay: {field}")
+                    return False
+            
+            # Check card_details is a list with at least one card
+            card_details = result.get('card_details', [])
+            if not isinstance(card_details, list) or len(card_details) == 0:
+                self.log_text("⚠️ No card details available for overlay")
+                return False
+            
+            # Validate recommended_pick is in valid range
+            recommended_pick = result.get('recommended_pick', 1)
+            if not isinstance(recommended_pick, int) or recommended_pick < 1 or recommended_pick > len(card_details):
+                self.log_text(f"⚠️ Invalid recommended_pick value: {recommended_pick}")
+                return False
+            
+            return True
+            
+        except Exception as e:
+            self.log_text(f"⚠️ Error validating analysis result: {e}")
+            return False
 
 
 def main():

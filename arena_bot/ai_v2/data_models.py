@@ -32,6 +32,7 @@ class DimensionalScores:
     # Source data quality indicators
     hsreplay_games_played: int = 0
     data_freshness_hours: float = 0.0
+    data_quality_score: float = 0.0
 
 
 @dataclass  

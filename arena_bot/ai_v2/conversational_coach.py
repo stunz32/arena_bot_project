@@ -12,12 +12,9 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 from .data_models import AIDecision, DeckState
 
-# Import for accessing other AI v2 components
-import sys
-from pathlib import Path
-sys.path.append(str(Path(__file__).parent.parent))
-from ai_v2.grandmaster_advisor import GrandmasterAdvisor
-from ai_v2.hero_selector import HeroSelectionAdvisor
+# Import for accessing other AI v2 components - using relative imports to avoid circular dependencies
+from .grandmaster_advisor import GrandmasterAdvisor
+from .hero_selector import HeroSelectionAdvisor
 
 
 class ConversationalCoach:

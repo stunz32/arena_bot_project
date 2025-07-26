@@ -12,10 +12,8 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 from datetime import datetime
 
-# Import for validation
-import sys
-sys.path.append(str(Path(__file__).parent.parent))
-from ai_v2.data_models import DimensionalScores
+# Import for validation - using relative import to avoid circular dependencies
+from .data_models import DimensionalScores
 
 
 @dataclass

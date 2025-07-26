@@ -182,6 +182,21 @@ class AssetLoader:
             self.logger.error(f"Error loading JSON data {data_path}: {e}")
             return None
     
+    def get_card_image_path(self, card_code: str, premium: bool = False) -> Path:
+        """
+        Get the full path to a card image by card code.
+        
+        Args:
+            card_code: Hearthstone card code (e.g., "AT_001")
+            premium: Whether to get premium (golden) version path
+            
+        Returns:
+            Path object to the card image file
+        """
+        suffix = "_premium" if premium else ""
+        filename = f"{card_code}{suffix}.png"
+        return self.assets_dir / "cards" / filename
+    
     def get_available_cards(self) -> List[str]:
         """
         Get list of available card codes.

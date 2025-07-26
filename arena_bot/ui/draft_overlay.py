@@ -13,6 +13,7 @@ import sys
 from typing import Dict, Optional, Tuple
 from dataclasses import dataclass
 import cv2
+from enum import Enum
 
 # Windows-specific imports for overlay transparency
 if sys.platform == 'win32':
@@ -374,6 +375,12 @@ class PerformanceMonitor:
 
 logger = logging.getLogger(__name__)
 
+# State machine constants for the overlay
+class OverlayState(Enum):
+    HIDDEN = "hidden"
+    HERO_SELECTION_MODE = "hero_selection_mode" 
+    CARD_PICK_MODE = "card_pick_mode"
+
 @dataclass
 class OverlayConfig:
     """Configuration for the draft overlay."""
@@ -409,9 +416,14 @@ class DraftOverlay:
         self.current_hero_analysis = None  # NEW: Hero selection analysis
         self.update_thread = None
         
-        # Draft phase tracking
+        # State machine with proper constants
+        self.overlay_state = OverlayState.HIDDEN
         self.draft_phase = "waiting"  # "waiting", "hero_selection", "card_picks"
         self.selected_hero = None
+        
+        # Debouncing system
+        self.pending_update_job = None
+        self.debounce_delay = 100  # milliseconds
         
         # UI elements
         self.status_label = None
@@ -419,6 +431,7 @@ class DraftOverlay:
         self.recommendation_frame = None
         self.hero_frame = None  # NEW: Hero selection frame
         self.card_frames = []
+        self.canvas = None  # Canvas for drawing bounding boxes and visual elements
         
         # AI v2 integration
         self.ai_v2_enabled = True
@@ -437,6 +450,353 @@ class DraftOverlay:
         self.smooth_animations_enabled = True
         
         self.logger.info("Enhanced DraftOverlay initialized with AI v2 support and performance optimizations")
+    
+    def update_display(self, analysis_result, mode):
+        """
+        Unified entry point for all overlay updates.
+        This is the ONLY method that should be called externally to update the overlay.
+        
+        Args:
+            analysis_result: The AI analysis result object containing card/hero data
+            mode: One of OverlayState values - HERO_SELECTION_MODE or CARD_PICK_MODE
+        """
+        if not self.root or not self.running:
+            return
+            
+        # Convert string mode to enum if needed
+        if isinstance(mode, str):
+            if mode.upper() == 'HERO_SELECTION_MODE':
+                mode = OverlayState.HERO_SELECTION_MODE
+            elif mode.upper() == 'CARD_PICK_MODE':
+                mode = OverlayState.CARD_PICK_MODE
+            else:
+                self.logger.warning(f"Unknown mode: {mode}")
+                return
+        
+        # Cancel any pending update to implement debouncing
+        if self.pending_update_job:
+            self.root.after_cancel(self.pending_update_job)
+            
+        # Schedule the actual update with debouncing
+        self.pending_update_job = self.root.after(
+            self.debounce_delay, 
+            lambda: self._execute_display_update(analysis_result, mode)
+        )
+    
+    def _execute_display_update(self, analysis_result, mode):
+        """
+        Execute the actual display update after debouncing delay.
+        """
+        try:
+            self.pending_update_job = None
+            
+            # Update overlay state
+            self.overlay_state = mode
+            
+            # Clear canvas if it exists
+            if self.canvas:
+                self.canvas.delete("all")
+            
+            # Route to appropriate display method based on mode
+            if mode == OverlayState.HERO_SELECTION_MODE:
+                self._render_hero_selection_mode(analysis_result)
+            elif mode == OverlayState.CARD_PICK_MODE:
+                self._render_card_pick_mode(analysis_result)
+            else:
+                self.logger.warning(f"Unknown overlay state: {mode}")
+                
+        except Exception as e:
+            self.logger.error(f"Error updating display: {e}")
+    
+    def _render_hero_selection_mode(self, analysis_result):
+        """
+        Render the overlay for hero selection mode.
+        """
+        # Transition to hero selection phase
+        self.transition_to_phase("hero_selection")
+        
+        # Call existing hero selection display logic
+        self.update_hero_selection_display(analysis_result)
+        
+        self.logger.info("Rendered hero selection mode")
+    
+    def _render_card_pick_mode(self, analysis_result):
+        """
+        Render the overlay for card pick mode with bounding boxes and visual cues.
+        """
+        # Transition to card picks phase  
+        self.transition_to_phase("card_picks")
+        
+        # Ensure canvas exists for drawing bounding boxes
+        if not self.canvas:
+            self._create_overlay_canvas()
+            
+        # Draw bounding boxes if coordinates are available
+        if hasattr(analysis_result, 'card_coordinates') or 'card_coordinates' in analysis_result:
+            self._draw_card_bounding_boxes(analysis_result)
+        
+        # Call existing card recommendation display logic
+        self.update_card_recommendation_display(analysis_result)
+        
+        self.logger.info("Rendered card pick mode")
+    
+    def _create_overlay_canvas(self):
+        """
+        Create a transparent canvas for drawing bounding boxes over the game.
+        """
+        if not self.root:
+            return
+            
+        # Create canvas that covers the game window
+        self.canvas = tk.Canvas(
+            self.root,
+            bg='black',  # Will be made transparent
+            highlightthickness=0,
+            bd=0,
+            insertwidth=0  # Remove cursor
+        )
+        
+        # Position canvas to cover the entire window
+        self.canvas.place(x=0, y=0, relwidth=1, relheight=1)
+        
+        # Send canvas to back so UI elements appear on top
+        self.canvas.lower()
+        
+        # Make canvas click-through by binding but not handling events
+        self.canvas.bind('<Button-1>', lambda e: 'break')
+        self.canvas.bind('<Motion>', lambda e: 'break')
+        
+        self.logger.info("Created overlay canvas for bounding boxes")
+    
+    def _get_confidence_color(self, confidence: float) -> str:
+        """Get color for confidence indicator based on confidence level."""
+        if confidence >= 0.8:
+            return '#27ae60'  # Green for high confidence
+        elif confidence >= 0.6:
+            return '#f39c12'  # Orange for medium confidence  
+        else:
+            return '#e74c3c'  # Red for low confidence
+    
+    def _animate_bounding_boxes_fade_in(self):
+        """Add fade-in animation to bounding boxes for professional feel."""
+        if not self.canvas or not self.smooth_animations_enabled:
+            return
+            
+        # Simple fade-in by gradually increasing opacity
+        animation_steps = 5
+        step_delay = 20  # milliseconds
+        
+        def fade_step(step):
+            if step <= animation_steps and self.canvas:
+                opacity = step / animation_steps
+                # Tkinter doesn't support true opacity, so we simulate with stipple patterns
+                stipple_patterns = ['', 'gray12', 'gray25', 'gray50', '']
+                if step < len(stipple_patterns):
+                    pattern = stipple_patterns[step]
+                    
+                    # Update all canvas items with current stipple
+                    for item in self.canvas.find_all():
+                        if 'card_' in str(self.canvas.gettags(item)):
+                            try:
+                                if pattern:
+                                    self.canvas.itemconfig(item, stipple=pattern)
+                                else:
+                                    self.canvas.itemconfig(item, stipple='')
+                            except tk.TclError:
+                                pass  # Item might not support stipple
+                
+                if step < animation_steps:
+                    self.root.after(step_delay, lambda: fade_step(step + 1))
+        
+        fade_step(0)
+    
+    def _animate_recommended_card_pulse(self, recommended_index: int):
+        """Add subtle pulsing animation to recommended card for attention."""
+        if not self.canvas or not self.smooth_animations_enabled:
+            return
+            
+        def pulse_step(step, direction=1):
+            if step <= 10 and self.canvas:
+                # Calculate pulse intensity (0.8 to 1.2 scale)
+                intensity = 1.0 + (direction * 0.2 * (step / 10))
+                
+                # Find recommended card items
+                rec_items = self.canvas.find_withtag(f"card_{recommended_index}")
+                
+                for item in rec_items:
+                    try:
+                        # Get current coordinates
+                        coords = self.canvas.coords(item)
+                        if len(coords) >= 4:
+                            x1, y1, x2, y2 = coords[:4]
+                            center_x, center_y = (x1 + x2) / 2, (y1 + y2) / 2
+                            
+                            # Scale around center
+                            width, height = x2 - x1, y2 - y1
+                            new_width = width * intensity
+                            new_height = height * intensity
+                            
+                            new_x1 = center_x - new_width / 2
+                            new_y1 = center_y - new_height / 2
+                            new_x2 = center_x + new_width / 2
+                            new_y2 = center_y + new_height / 2
+                            
+                            self.canvas.coords(item, new_x1, new_y1, new_x2, new_y2)
+                    except (tk.TclError, ValueError):
+                        pass  # Item might not support coordinate changes
+                
+                # Continue animation
+                if step < 10:
+                    self.root.after(50, lambda: pulse_step(step + 1, direction))
+                elif direction == 1:
+                    # Reverse direction for pulse effect
+                    self.root.after(50, lambda: pulse_step(0, -1))
+        
+        # Start pulse animation
+        self.root.after(500, lambda: pulse_step(0))  # Delay start by 500ms
+    
+    def _draw_card_bounding_boxes(self, analysis_result):
+        """
+        Draw colored bounding boxes around detected cards with hero synergy indicators.
+        """
+        if not self.canvas:
+            return
+            
+        # Get card coordinates and analysis data
+        card_coordinates = getattr(analysis_result, 'card_coordinates', 
+                                 analysis_result.get('card_coordinates', []))
+        card_details = getattr(analysis_result, 'card_details',
+                             analysis_result.get('card_details', []))
+        recommended_pick = getattr(analysis_result, 'recommended_pick',
+                                 analysis_result.get('recommended_pick', 1)) - 1  # Convert to 0-based
+        
+        if not card_coordinates or len(card_coordinates) < 3:
+            self.logger.warning("No card coordinates available for bounding boxes")
+            return
+            
+        # Color mapping for different recommendation levels
+        colors = {
+            'recommended': '#27ae60',  # Green for recommended pick
+            'good': '#f39c12',         # Yellow for good alternatives  
+            'poor': '#95a5a6'          # Gray for poor choices
+        }
+        
+        for i, (x, y, w, h) in enumerate(card_coordinates[:3]):
+            if i >= len(card_details):
+                continue
+                
+            card = card_details[i]
+            
+            # Determine box color based on recommendation level
+            if i == recommended_pick:
+                box_color = colors['recommended']
+                line_width = 4
+            else:
+                # Score-based color determination
+                score = card.get('tier_score', 0.5)
+                if score > 0.7:
+                    box_color = colors['good']
+                    line_width = 3
+                else:
+                    box_color = colors['poor']
+                    line_width = 2
+            
+            # Draw bounding box with shadow effect for better visibility
+            # Shadow
+            self.canvas.create_rectangle(
+                x + 2, y + 2, x + w + 2, y + h + 2,
+                outline='black',
+                width=line_width,
+                tags=f"card_shadow_{i}"
+            )
+            
+            # Main box
+            box_id = self.canvas.create_rectangle(
+                x, y, x + w, y + h,
+                outline=box_color,
+                width=line_width,
+                tags=f"card_{i}"
+            )
+            
+            # Add subtle fill for recommended card
+            if i == recommended_pick:
+                self.canvas.create_rectangle(
+                    x + line_width, y + line_width, 
+                    x + w - line_width, y + h - line_width,
+                    fill=box_color,
+                    stipple='gray25',  # Semi-transparent fill
+                    tags=f"card_fill_{i}"
+                )
+            
+            # Add confidence indicator bar at top of card
+            confidence = card.get('confidence', 0.8)
+            confidence_width = int((w - 20) * confidence)
+            confidence_color = self._get_confidence_color(confidence)
+            
+            self.canvas.create_rectangle(
+                x + 10, y + 5,
+                x + 10 + confidence_width, y + 12,
+                fill=confidence_color,
+                outline='white',
+                width=1,
+                tags=f"confidence_{i}"
+            )
+            
+            # Add hero synergy icon if applicable
+            if self.selected_hero:
+                synergy_level = self._calculate_hero_synergy_level(card, self.selected_hero)
+                synergy_icon = self._get_synergy_indicator(synergy_level)
+                
+                if synergy_icon:
+                    # Icon background for better visibility
+                    self.canvas.create_oval(
+                        x + w - 35, y + 5,
+                        x + w - 5, y + 35,
+                        fill='black',
+                        outline='white',
+                        width=1,
+                        tags=f"synergy_bg_{i}"
+                    )
+                    
+                    self.canvas.create_text(
+                        x + w - 20, y + 20,
+                        text=synergy_icon,
+                        fill='white',
+                        font=('Arial', 16, 'bold'),
+                        tags=f"synergy_{i}"
+                    )
+            
+            # Add pick number indicator
+            self.canvas.create_oval(
+                x + 5, y + h - 35,
+                x + 35, y + h - 5,
+                fill=box_color,
+                outline='white',
+                width=2,
+                tags=f"pick_bg_{i}"
+            )
+            
+            self.canvas.create_text(
+                x + 20, y + h - 20,
+                text=str(i + 1),
+                fill='white',
+                font=('Arial', 14, 'bold'),
+                tags=f"pick_num_{i}"
+            )
+            
+            # Add enhanced tooltip to bounding box
+            hero_context = {'class': self.selected_hero} if self.selected_hero else {}
+            self._add_enhanced_tooltip_to_canvas_item(f"card_{i}", card, hero_context)
+        
+        # Add fade-in animation effect if enabled
+        if self.smooth_animations_enabled:
+            self._animate_bounding_boxes_fade_in()
+        
+        # Add subtle pulsing animation for recommended card
+        if len(card_coordinates) > recommended_pick:
+            self._animate_recommended_card_pulse(recommended_pick)
+        
+        self.logger.info(f"Drew bounding boxes for {len(card_coordinates)} cards with visual enhancements")
     
     def create_overlay_window(self) -> tk.Tk:
         """Create the adaptive overlay window that adjusts based on draft phase."""
@@ -469,16 +829,21 @@ class DraftOverlay:
                 win32gui.SetLayeredWindowAttributes(
                     hwnd, 
                     0,  # Color key (0 = black will be transparent)
-                    255,  # Alpha value (255 = fully opaque for non-transparent areas)
+                    int(255 * self.config.opacity),  # Use config opacity
                     win32con.LWA_COLORKEY | win32con.LWA_ALPHA
                 )
+                
+                # Store hwnd for later transparency updates
+                self.hwnd = hwnd
                 
                 self.logger.info("✅ Windows transparency enabled - overlay should be click-through")
                 
             except Exception as e:
                 self.logger.warning(f"⚠️ Failed to set Windows transparency: {e}")
+                self.hwnd = None
         else:
             self.logger.info("ℹ️ Using standard Tkinter transparency (not Windows)")
+            self.hwnd = None
         
         # Dynamic window sizing based on phase
         self.update_window_size_for_phase("waiting")
@@ -1411,6 +1776,150 @@ class DraftOverlay:
         self.config.show_confidence_indicators = False
         self.logger.info("Reduced tooltip complexity for performance")
     
+    def _add_enhanced_tooltip_to_canvas_item(self, item_id: int, card_data: Dict, hero_context: Dict = None):
+        """Add enhanced tooltip to canvas items for bounding boxes."""
+        if not self.canvas:
+            return
+            
+        def on_enter(event):
+            # Show tooltip near cursor
+            tooltip_text = f"Card Analysis: {card_data.get('card_code', 'Unknown')}"
+            
+            card_context = {
+                'win_rate': card_data.get('win_rate'),
+                'tier_score': card_data.get('tier_score'),
+                'confidence': card_data.get('confidence', 0.8),
+                'hero_synergy_score': card_data.get('hero_synergy_score'),
+                'hsreplay_data': True,
+                'ai_analysis': True,
+                'analysis_time': 45.0
+            }
+            
+            # Create floating tooltip window
+            self._show_canvas_tooltip(event.x_root, event.y_root, tooltip_text, hero_context or {}, card_context)
+        
+        def on_leave(event):
+            self._hide_canvas_tooltip()
+        
+        # Bind events to canvas item
+        self.canvas.tag_bind(item_id, '<Enter>', on_enter)
+        self.canvas.tag_bind(item_id, '<Leave>', on_leave)
+    
+    def _show_canvas_tooltip(self, x: int, y: int, text: str, hero_context: Dict, card_context: Dict):
+        """Show tooltip for canvas items."""
+        if hasattr(self, '_canvas_tooltip') and self._canvas_tooltip:
+            self._canvas_tooltip.destroy()
+            
+        self._canvas_tooltip = tk.Toplevel(self.root)
+        self._canvas_tooltip.wm_overrideredirect(True)
+        self._canvas_tooltip.configure(bg="#1a1a2e", relief="solid", bd=1)
+        
+        # Create simplified tooltip content for canvas items
+        tooltip_frame = tk.Frame(self._canvas_tooltip, bg="#1a1a2e", padx=8, pady=6)
+        tooltip_frame.pack()
+        
+        # Main text
+        main_label = tk.Label(
+            tooltip_frame,
+            text=text,
+            bg="#1a1a2e",
+            fg="#ffd700",
+            font=("Arial", 10, "bold")
+        )
+        main_label.pack()
+        
+        # Quick stats
+        if card_context.get('tier_score'):
+            stats_text = f"Score: {card_context['tier_score']:.1f} | Confidence: {card_context.get('confidence', 0.8):.1%}"
+            stats_label = tk.Label(
+                tooltip_frame,
+                text=stats_text,
+                bg="#1a1a2e",
+                fg="#ecf0f1",
+                font=("Arial", 8)
+            )
+            stats_label.pack()
+        
+        # Position tooltip
+        self._canvas_tooltip.geometry(f"+{x+10}+{y+10}")
+        self._canvas_tooltip.attributes('-topmost', True)
+    
+    def _hide_canvas_tooltip(self):
+        """Hide canvas tooltip."""
+        if hasattr(self, '_canvas_tooltip') and self._canvas_tooltip:
+            self._canvas_tooltip.destroy()
+            self._canvas_tooltip = None
+    
+    def _enhance_window_for_gaming(self):
+        """Apply gaming-specific window enhancements for optimal overlay experience."""
+        if not self.root:
+            return
+            
+        try:
+            # Set window to always stay on top but not steal focus
+            self.root.attributes('-topmost', True)
+            
+            # Minimize window interaction to avoid interfering with game
+            self.root.overrideredirect(False)  # Keep window decorations for user control
+            
+            # Set optimal refresh rate for smooth updates
+            self.root.tk.call('wm', 'attributes', self.root, '-alpha', self.config.opacity)
+            
+            # Enable smooth window movement if supported
+            if hasattr(self.root, 'attributes'):
+                try:
+                    self.root.attributes('-smoothresize', True)
+                except tk.TclError:
+                    pass  # Not supported on all systems
+            
+            self.logger.info("Enhanced window for optimal gaming overlay experience")
+            
+        except Exception as e:
+            self.logger.warning(f"Could not apply gaming enhancements: {e}")
+    
+    def get_overlay_performance_report(self) -> str:
+        """Generate comprehensive performance report for debugging and optimization."""
+        metrics = self.get_performance_metrics()
+        
+        report = "🎯 DRAFT OVERLAY PERFORMANCE REPORT\n"
+        report += "=" * 50 + "\n\n"
+        
+        # Performance metrics
+        report += f"📊 Rendering Performance:\n"
+        report += f"   • Average render time: {metrics['average_render_time_ms']:.1f}ms\n"
+        report += f"   • Total renders: {metrics['total_renders']}\n"
+        report += f"   • Frame drops: {metrics['frame_drops']} ({metrics['frame_drop_rate']:.1%})\n\n"
+        
+        # Optimization status
+        report += f"⚡ Optimization Status:\n"
+        report += f"   • Batch rendering: {'✅ Enabled' if metrics['batch_rendering_enabled'] else '❌ Disabled'}\n"
+        report += f"   • UI caching: {'✅ Enabled' if metrics['ui_caching_enabled'] else '❌ Disabled'}\n"
+        report += f"   • Smooth animations: {'✅ Enabled' if metrics['smooth_animations_enabled'] else '❌ Disabled'}\n"
+        report += f"   • Auto-optimization: {'🔄 Active' if metrics['optimization_active'] else '💤 Inactive'}\n\n"
+        
+        # Resource usage
+        report += f"💾 Resource Usage:\n"
+        report += f"   • UI cache size: {metrics['cache_size']} elements\n"
+        report += f"   • Render queue size: {metrics['render_queue_size']} operations\n\n"
+        
+        # Recommendations
+        if metrics['frame_drop_rate'] > 0.1:
+            report += "⚠️ PERFORMANCE RECOMMENDATIONS:\n"
+            report += "   • Consider enabling batch rendering\n"
+            report += "   • Reduce tooltip complexity\n"
+            report += "   • Check system resources\n\n"
+        else:
+            report += "✅ Performance is optimal - no recommendations needed\n\n"
+        
+        # Current state
+        report += f"🎮 Current State:\n"
+        report += f"   • Overlay state: {self.overlay_state.value}\n"
+        report += f"   • Draft phase: {self.draft_phase}\n"
+        report += f"   • Selected hero: {self.selected_hero or 'None'}\n"
+        report += f"   • Running: {'✅ Yes' if self.running else '❌ No'}\n"
+        
+        return report
+    
     def get_performance_metrics(self) -> Dict:
         """Get current performance metrics for monitoring."""
         return {
@@ -1480,8 +1989,10 @@ class DraftOverlay:
         )
         
         # Hide hero frame and show card frame
-        self.hero_frame.pack_forget()
-        self.recommendation_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        if self.hero_frame:
+            self.hero_frame.pack_forget()
+        if self.recommendation_frame:
+            self.recommendation_frame.pack(fill="both", expand=True, padx=10, pady=10)
         
         # Use the existing card display logic with enhancements
         self.update_recommendation_display(analysis)
@@ -1614,6 +2125,9 @@ class DraftOverlay:
                     except tk.TclError:
                         # Window was destroyed
                         self.running = False
+            
+            # Apply gaming-specific enhancements
+            self._enhance_window_for_gaming()
             
             self.root.after(10, update_overlay)  # Start the update loop
             self.root.mainloop()  # Keep for final cleanup
