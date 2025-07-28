@@ -1094,7 +1094,7 @@ class SmartCoordinateDetector:
         
         # Distribute 3 cards across the interface width
         # Based on successful test: cards are positioned in 4 sections (1, 2, 3)
-        card_spacing = interface_w // 4
+        card_spacing = max(interface_w // 4, card_width + 20)  # Ensure cards don't overlap with 20px minimum gap
         
         card_positions = []
         for i in range(3):

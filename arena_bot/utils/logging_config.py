@@ -34,6 +34,9 @@ def setup_logging(log_level=logging.INFO):
     console_handler = logging.StreamHandler()
     console_handler.setLevel(log_level)
     console_handler.setFormatter(formatter)
+    # Set UTF-8 encoding to handle emoji characters
+    if hasattr(console_handler.stream, 'reconfigure'):
+        console_handler.stream.reconfigure(encoding='utf-8')
     
     # File handler (with rotation)
     file_handler = logging.handlers.RotatingFileHandler(
