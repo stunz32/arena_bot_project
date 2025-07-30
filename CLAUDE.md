@@ -1,129 +1,138 @@
-# CLAUDE.md - Arena Bot Project Rules
+You are an EXPERT software developer
 
-## 🗂️ DIRECTORY ACCESS FOR FUTURE CLAUDE INSTANCES
+Write concise, efficient code. ALWAYS COMMENT YOUR CODE. NEVER ERASE OLD COMMENTS IF THEY ARE STILL USEFUL
 
-### **Primary Working Directory:**
-```bash
-cd "/mnt/d/cursor bots/arena_bot_project"
+IMPORTANT GUIDELINES
+COMMENTING:
+Use clear and concise language
+Avoid stating the obvious (e.g., don't just restate what the code does)
+Focus on the "why" and "how" rather than just the "what"
+Use single-line comments for brief explanations
+Use multi-line comments for longer explanations or function/class descriptions
+Ensure comments are JSDoc3 styled
+
+LOGGING
+Log EVERY logical connection and workflow of the codebase
+Your output should be the original code with your added comments. Make sure to preserve the original code's formatting and structure.
+
+# Codebase Commenting Guidelines
+
+## Philosophy
+
+Our primary goal for commenting is *clarity and maintainability**. In a TypeScript codebase, types already provide significant information about the *what*. Therefore, our comments should focus on the **why**, the **intent**, and the **complexities* that aren't immediately obvious from the code and types alone.
+
+We use *JSDoc* as the standard format. This provides structure, integrates well with TypeScript's language server for enhanced IntelliSense, and offers a consistent format for both human developers and AI systems interacting with our code.
+
+Comments should add value. Avoid redundant comments that merely restate the obvious or duplicate type information. Prioritize commenting public APIs, complex logic, and non-intuitive decisions.
+
+## Core Standard: JSDoc
+
+All multi-line comments explaining functions, classes, types, components, hooks, or complex blocks should use the JSDoc format (`/** ... */`).
+
+## When to Comment
+
+Focus commenting efforts where they provide the most value:
+
+1.  *Public APIs / Exports:*
+    *   *Functions/Methods:* Explain purpose, parameters, return values, and any potential side effects or errors.
+    *   *React Components:* Describe the component's purpose, its props, and any significant state or behavior. Use `@param` for props.
+    *   *Custom Hooks:* Explain what the hook does, its parameters, and what it returns.
+    *   *Utility Functions/Classes:* Document any exported helpers or classes intended for reuse.
+    *   *Types/Interfaces:* Explain the purpose of complex or broadly used custom types if the name isn't self-explanatory.
+
+2.  *Complex Logic:*
+    *   If an algorithm, calculation, or piece of business logic is intricate or non-obvious, add comments explaining the approach and the reasoning behind it. Focus on the *why*.
+
+3.  *Non-Obvious Decisions & Trade-offs:*
+    *   If a particular implementation choice was made for specific reasons (performance, browser compatibility, workaround for a library bug), document it. This provides crucial context for future maintainers.
+
+4.  *Important Constants or Configuration:*
+    *   If the purpose of a constant isn't immediately clear from its name and value, add a brief explanation.
+
+5.  *Workarounds and `TODO`s:*
+    *   Use `// HACK:` or `// WORKAROUND:` for temporary fixes, explaining why the workaround is necessary and potentially linking to an issue tracker.
+    *   Use `// TODO:` for planned improvements or missing features, ideally with context or an issue link.
+
+6.  *Type Clarifications (Sparingly):*
+    *   In rare cases where TypeScript's inference might be ambiguous or a type needs further semantic meaning, a JSDoc `@type` tag or explanation can help. However, prefer refining the TypeScript types themselves first.
+
+## How to Comment with JSDoc (Essential Tags)
+
+Use clear, concise English. Start block comments with a brief summary sentence.
+
+```typescript
+/**
+ * [Summary sentence explaining the overall purpose.]
+ *
+ * [Optional: More detailed explanation, rationale, or context.]
+ *
+ * @param {Type} name - [Description of the parameter's purpose and expected value.]
+ * @param {Type} [optionalName] - [Description for optional parameter. Use brackets.]
+ * @param {Type} [nameWithDefault='default'] - [Description for parameter with default.]
+ * @param {object} options - Description of the options object.
+ * @param {string} options.id - Description of the 'id' property within options.
+ * @param {number} [options.count] - Description of optional 'count' property.
+ * @returns {ReturnType} - [Description of what the function returns and why/when.]
+ * @throws {ErrorType} - [Description of when/why this error might be thrown.]
+ * @deprecated [Reason for deprecation and/or alternative to use.]
+ * @see {Link/Reference} - [Link to related functions, documentation, or issue tracker.]
+ * @example
+ * ```typescript
+ * // Example usage demonstrates how to call it.
+ * const result = myFunction(inputValue);
+ * console.log(result);
+ * ```
+ */
+ function myFunction(name: string, options: { id: string; count?: number }): ReturnType {
+   // ...implementation
+ }
+
+/**
+ * Represents a user profile within the application.
+ * Used across various UI components and API interactions.
+ */
+export type UserProfile = {
+  /** Unique identifier for the user. */
+  id: string;
+  /** User's display name. May not be unique. */
+  name: string;
+  /** Optional email address. */
+  email?: string;
+};
+
+/**
+ * Renders the main application layout, including header and footer.
+ *
+ * @param {object} props - Component properties.
+ * @param {React.ReactNode} props.children - Content to be rendered within the layout.
+ * @returns {JSX.Element} The main application layout structure.
+ */
+export const MainLayout = ({ children }: { children: React.ReactNode }): JSX.Element => {
+  // ...implementation
+};
 ```
 
-### **If Path Issues Occur:**
-1. **Find the project:**
-   ```bash
-   find /mnt -name "arena_bot_project" -type d 2>/dev/null
-   ```
-2. **Verify correct directory by checking for:**
-   - `CLAUDE_ARENA_BOT_CHECKPOINT.md` (main context file)
-   - `integrated_arena_bot_gui.py` (primary bot)
-   - `arena_bot/` directory
-   - `assets/cards/` with 12,000+ images
+*Key JSDoc Tags to Use:*
 
-### **Emergency File Location:**
-```bash
-find /mnt -name "*CHECKPOINT*" -type f 2>/dev/null
-find /mnt -name "integrated_arena_bot*" -type f 2>/dev/null
-```
+*   *Description:* Always provide a clear summary. Add more detail if necessary.
+*   *`@param {Type} name - Description`**: Essential for functions/methods/hooks. Explain the *role of the parameter. TypeScript handles the type, JSDoc explains the *purpose*.
+*   *`@returns {Type} - Description`**: Explain *what is being returned and under what conditions, especially if it's complex or conditional.
+*   *`@props {object} - Description`* (Often implicit via `@param` in functional components): Used for documenting component props object. Individual props can be documented using `@param {Type} props.propName - Description`.
+*   **`@type {Type}`**: Use primarily for documenting constants or variables where type inference needs clarification (less common with explicit TS types).
+*   **`@example`**: Very helpful for demonstrating usage, especially for utilities or complex functions.
+*   **`@throws {ErrorType} - Condition`**: Document expected errors that callers might need to handle.
+*   **`@deprecated - Reason/Alternative`**: Crucial for managing API evolution.
+*   **`@see {Link/Reference}`**: Useful for linking to related code, external docs, or issue trackers.
 
-## 🚨 CRITICAL PROJECT RULES
+## What NOT to Comment
 
-
-# Using Gemini CLI for Large Codebase Analysis
-
-  When analyzing large codebases or multiple files that might exceed context limits, use the Gemini CLI with its massive
-  context window. Use `gemini -p` to leverage Google Gemini's large context capacity.
-
-  ## File and Directory Inclusion Syntax
-
-  Use the `@` syntax to include files and directories in your Gemini prompts. The paths should be relative to WHERE you run the
-   gemini command:
-
-  ### Examples:
-
-  **Single file analysis:**
-  ```bash
-  gemini -p "@src/main.py Explain this file's purpose and structure"
-
-  Multiple files:
-  gemini -p "@package.json @src/index.js Analyze the dependencies used in the code"
-
-  Entire directory:
-  gemini -p "@src/ Summarize the architecture of this codebase"
-
-  Multiple directories:
-  gemini -p "@src/ @tests/ Analyze test coverage for the source code"
-
-  Current directory and subdirectories:
-  gemini -p "@./ Give me an overview of this entire project"
-  
-#
- Or use --all_files flag:
-  gemini --all_files -p "Analyze the project structure and dependencies"
-
-  Implementation Verification Examples
-
-  Check if a feature is implemented:
-  gemini -p "@src/ @lib/ Has dark mode been implemented in this codebase? Show me the relevant files and functions"
-
-  Verify authentication implementation:
-  gemini -p "@src/ @middleware/ Is JWT authentication implemented? List all auth-related endpoints and middleware"
-
-  Check for specific patterns:
-  gemini -p "@src/ Are there any React hooks that handle WebSocket connections? List them with file paths"
-
-  Verify error handling:
-  gemini -p "@src/ @api/ Is proper error handling implemented for all API endpoints? Show examples of try-catch blocks"
-
-  Check for rate limiting:
-  gemini -p "@backend/ @middleware/ Is rate limiting implemented for the API? Show the implementation details"
-
-  Verify caching strategy:
-  gemini -p "@src/ @lib/ @services/ Is Redis caching implemented? List all cache-related functions and their usage"
-
-  Check for specific security measures:
-  gemini -p "@src/ @api/ Are SQL injection protections implemented? Show how user inputs are sanitized"
-
-  Verify test coverage for features:
-  gemini -p "@src/payment/ @tests/ Is the payment processing module fully tested? List all test cases"
-
-  When to Use Gemini CLI
-
-  Use gemini -p when:
-  - Analyzing entire codebases or large directories
-  - Comparing multiple large files
-  - Need to understand project-wide patterns or architecture
-  - Current context window is insufficient for the task
-  - Working with files totaling more than 100KB
-  - Verifying if specific features, patterns, or security measures are implemented
-  - Checking for the presence of certain coding patterns across the entire codebase
-
-  Important Notes
-
-  - Paths in @ syntax are relative to your current working directory when invoking gemini
-  - The CLI will include file contents directly in the context
-  - No need for --yolo flag for read-only analysis
-  - Gemini's context window can handle entire codebases that would overflow Claude's context
-  - When checking implementations, be specific about what you're looking for to get accurate results # Using Gemini CLI for Large Codebase Analysis
+*   *Obvious Code:* Don't explain code that is self-evident (e.g., `// Increment count` for `count++`).
+*   *Exact Type Duplication:* Avoid comments that just re-state the TypeScript type (e.g., `/** @param {string} userId - The user ID /` when the TS signature is `userId: string`). Focus on *purpose if adding a `@param` comment.
+*   *Version Control Information:* Don't add comments about authors or change history (`// Changed by John Doe on 2023-10-27`). Use `git blame` and commit history for this.
+*   *Outdated Comments:* Delete or update comments ruthlessly if the code changes. Incorrect comments are worse than no comments.
+*   *Commented-Out Code:* Remove dead code instead of commenting it out. Use version control to retrieve old code if needed.
 
 
 
-### **BEFORE MAKING ANY CHANGES:**
-1. **READ CLAUDE_ARENA_BOT_CHECKPOINT.md COMPLETELY** - This contains all project context and history
-2. **NEVER simplify existing production modules** - They exist for good reasons
-3. **NEVER create "basic" implementations** - Advanced versions already exist
-4. **ALWAYS use existing production modules** - Don't reinvent the wheel
-5. **CHECK the checkpoint for current status** - Understand what's already implemented
 
-### **IF BOT "ISN'T WORKING":**
-1. **Check if user is using correct launcher** (see Production Launchers section in checkpoint)
-2. **Verify environment** (Windows native vs WSL vs GUI requirements)
-3. **Check existing implementations** before creating new ones
-4. **Read debug output carefully** - it shows what's actually happening
-
-1. First think through the problem, read the codebase for relevant files, and write a plan to tasks/todo.md.
-2. The plan should have a list of todo items that you can check off as you complete them
-3. Before you begin working, check in with me and I will verify the plan.
-4. Then, begin working on the todo items, marking them as complete as you go.
-5. Please every step of the way just give me a high level explanation of what changes you made
-6. Make every task and code change you do as simple as possible. We want to avoid making any massive or complex changes. Every change should impact as little code as possible. Everything is about simplicity.
-7. Finally, add a review section to the [todo.md](http://todo.md/) file with a summary of the changes you made and any other relevant information.
 

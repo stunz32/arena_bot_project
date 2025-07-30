@@ -1,0 +1,100 @@
+{
+  "test_session": {
+    "timestamp": "2025-07-29T19:09:36.919698",
+    "duration_seconds": 3.254049301147461,
+    "total_tests": 5,
+    "success_rate": 0.6
+  },
+  "test_results": {
+    "passed": 3,
+    "failed": 2,
+    "critical": 0,
+    "warnings": 0
+  },
+  "performance_metrics": {
+    "total_execution_time": 3.001227378845215,
+    "peak_memory_mb": 93.71875,
+    "peak_cpu_percent": 95.5,
+    "memory_delta_mb": 44.34765625,
+    "thread_delta": 15
+  },
+  "quality_gates": {
+    "passed": 2,
+    "total": 5,
+    "details": {
+      "zero_critical_failures": true,
+      "performance_compliance": false,
+      "resource_cleanup": false,
+      "success_rate_acceptable": false,
+      "no_system_crashes": true
+    }
+  },
+  "system_readiness": {
+    "production_ready": false,
+    "confidence_level": 0.24
+  },
+  "detailed_results": [
+    {
+      "test_name": "Full Automation Pipeline",
+      "status": "FAIL",
+      "execution_time": 0.02451801300048828,
+      "error_details": null,
+      "performance_metrics": {
+        "cpu_peak": 0.0,
+        "memory_peak_mb": 49.375,
+        "memory_delta_mb": 0.0
+      }
+    },
+    {
+      "test_name": "Manual Correction Workflow",
+      "status": "PASS",
+      "execution_time": 1.5533554553985596,
+      "error_details": null,
+      "performance_metrics": {
+        "cpu_peak": 85.0,
+        "memory_peak_mb": 49.375,
+        "memory_delta_mb": 43.49609375
+      }
+    },
+    {
+      "test_name": "Graceful Degradation",
+      "status": "PASS",
+      "execution_time": 0.011651992797851562,
+      "error_details": null,
+      "performance_metrics": {
+        "cpu_peak": 79.5,
+        "memory_peak_mb": 92.87109375,
+        "memory_delta_mb": 0.0
+      }
+    },
+    {
+      "test_name": "GUI & Overlay Chaos",
+      "status": "PASS",
+      "execution_time": 1.0986950397491455,
+      "error_details": null,
+      "performance_metrics": {
+        "cpu_peak": 67.7,
+        "memory_peak_mb": 92.87109375,
+        "memory_delta_mb": 0.84765625
+      }
+    },
+    {
+      "test_name": "Dual-AI System Integrity",
+      "status": "FAIL",
+      "execution_time": 0.3130068778991699,
+      "error_details": null,
+      "performance_metrics": {
+        "cpu_peak": 95.5,
+        "memory_peak_mb": 93.71875,
+        "memory_delta_mb": 0.00390625
+      }
+    }
+  ],
+  "recommendations": [
+    "\u274c HIGH PRIORITY: Resolve failed test scenarios to ensure system reliability",
+    "\ud83e\uddf5 THREADS: Investigate thread leak - 15 threads not cleaned up",
+    "\u26a1 PERFORMANCE: Optimize CPU usage - peak 95.5% exceeds target",
+    "\ud83d\udcc8 RELIABILITY: Improve success rate - currently 60.0%"
+  ],
+  "critical_issues": []
+}

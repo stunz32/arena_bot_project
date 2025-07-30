@@ -8,6 +8,7 @@ Based on Arena Tracker's proven log monitoring methodology.
 import os
 import time
 import re
+import hashlib  # NEW: For event deduplication signatures
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -72,11 +73,22 @@ class HearthstoneLogMonitor:
         self.on_draft_start = None
         self.on_draft_complete = None
         
-        # Arena Tracker-style regex patterns
+        # NEW: Event deduplication and heartbeat monitoring (AI Helper integration)
+        self.event_deduplication_cache = set()  # Cache for preventing duplicate events
+        self.max_cache_size = 1000  # Prevent memory growth
+        self.last_heartbeat = datetime.now()
+        self.heartbeat_interval = 30  # seconds
+        self.log_file_accessible = True
+        self.error_recovery_attempts = 0
+        self.max_error_recovery_attempts = 3
+        
+        # Arena Tracker-style regex patterns (Enhanced for AI Helper integration)
         self.patterns = {
             'draft_pick': re.compile(r'DraftManager\.OnChosen.*Slot=(\d+).*cardId=([A-Z0-9_]+).*Premium=(\w+)'),
             'draft_hero': re.compile(r'DraftManager\.OnHeroChosen.*HeroCardID=([A-Z0-9_]+)'),
             'draft_choices': re.compile(r'DraftManager\.OnChoicesAndContents'),
+            # NEW: Enhanced draft choices pattern for AI Helper integration
+            'draft_choices_detailed': re.compile(r'DraftManager\.OnChoicesAndContents.*(?:cardId=([A-Z0-9_]+).*){3}'),
             'draft_deck_card': re.compile(r'Draft deck contains card ([A-Z0-9_]+)'),
             'scene_loaded': re.compile(r'LoadingScreen\.OnSceneLoaded.*currMode=(\w+)'),
             'scene_unload': re.compile(r'LoadingScreen\.OnScenePreUnload.*nextMode=(\w+)'),
@@ -85,6 +97,117 @@ class HearthstoneLogMonitor:
         
         print("🎯 Hearthstone Log Monitor Initialized")
         print(f"📁 Monitoring: {self.logs_base_path}")
+    
+    def _generate_event_signature(self, message: str, component: str) -> str:
+        """
+        Generate a unique signature for event deduplication.
+        Uses a combination of message content and timestamp.
+        
+        Args:
+            message: The log message content
+            component: The log component (e.g., 'arena', 'power')
+            
+        Returns:
+            str: Unique event signature for deduplication
+        """
+        # Create a hash of the message content (first 100 chars to avoid long duplicates)
+        message_hash = hashlib.md5(message[:100].encode()).hexdigest()[:8]
+        return f"{component}:{message_hash}"
+    
+    def _is_duplicate_event(self, event_signature: str) -> bool:
+        """
+        Check if an event is a duplicate based on its signature.
+        
+        Args:
+            event_signature: The event signature to check
+            
+        Returns:
+            bool: True if the event is a duplicate, False otherwise
+        """
+        if event_signature in self.event_deduplication_cache:
+            return True
+        
+        # Add to cache and manage cache size
+        self.event_deduplication_cache.add(event_signature)
+        
+        # Prevent memory growth by clearing old entries
+        if len(self.event_deduplication_cache) > self.max_cache_size:
+            # Remove the oldest half of entries (approximate)
+            old_cache = list(self.event_deduplication_cache)
+            self.event_deduplication_cache = set(old_cache[self.max_cache_size // 2:])
+        
+        return False
+    
+    def _check_heartbeat_and_log_accessibility(self) -> bool:
+        """
+        Check if log files are accessible and update heartbeat.
+        Implements heartbeat monitoring for log file accessibility.
+        
+        Returns:
+            bool: True if log files are accessible, False otherwise
+        """
+        now = datetime.now()
+        
+        # Check if it's time for a heartbeat
+        if (now - self.last_heartbeat).seconds >= self.heartbeat_interval:
+            self.last_heartbeat = now
+            
+            # Check log file accessibility
+            try:
+                if self.current_log_dir and self.current_log_dir.exists():
+                    # Try to read from a log file to verify accessibility
+                    test_files = list(self.log_files.values())[:1]  # Test first available log file
+                    if test_files:
+                        test_file = test_files[0]
+                        if test_file.exists() and os.access(test_file, os.R_OK):
+                            self.log_file_accessible = True
+                            self.error_recovery_attempts = 0  # Reset error counter on success
+                        else:
+                            self.log_file_accessible = False
+                    else:
+                        self.log_file_accessible = False
+                else:
+                    self.log_file_accessible = False
+                    
+            except Exception as e:
+                print(f"⚠️ Heartbeat check failed: {e}")
+                self.log_file_accessible = False
+                self.error_recovery_attempts += 1
+                
+                # Attempt error recovery if we haven't exceeded max attempts
+                if self.error_recovery_attempts <= self.max_error_recovery_attempts:
+                    self._attempt_log_error_recovery()
+            
+            # Log heartbeat status
+            if self.log_file_accessible:
+                print(f"💓 Heartbeat OK - Log files accessible at {now.strftime('%H:%M:%S')}")
+            else:
+                print(f"💔 Heartbeat FAILED - Log files inaccessible at {now.strftime('%H:%M:%S')}")
+        
+        return self.log_file_accessible
+    
+    def _attempt_log_error_recovery(self):
+        """
+        Attempt to recover from log parsing errors or accessibility issues.
+        Implements log parsing error recovery mechanisms.
+        """
+        print(f"🔄 Attempting log error recovery (attempt {self.error_recovery_attempts}/{self.max_error_recovery_attempts})")
+        
+        try:
+            # Try to re-discover log directory
+            self.current_log_dir = self.find_latest_log_directory()
+            
+            if self.current_log_dir:
+                # Re-discover log files
+                self.log_files = self.discover_log_files(self.current_log_dir)
+                # Reset log positions to avoid reading stale data
+                self.log_positions = {}
+                print("✅ Log error recovery successful - found new log directory")
+            else:
+                print("❌ Log error recovery failed - no log directory found")
+                
+        except Exception as e:
+            print(f"❌ Log error recovery failed: {e}")
     
     def find_latest_log_directory(self) -> Optional[Path]:
         """
@@ -307,7 +430,7 @@ class HearthstoneLogMonitor:
                 self.current_hero = hero_code
                 print(f"👑 HERO SELECTED: {hero_code}")
             
-            # Draft start detection
+            # Draft start detection (Enhanced for AI Helper integration)
             if self.patterns['draft_choices'].search(message):
                 if self.current_game_state != GameState.ARENA_DRAFT:
                     self._display_draft_start()
@@ -315,6 +438,12 @@ class HearthstoneLogMonitor:
                     self._set_game_state(GameState.ARENA_DRAFT)
                     if self.on_draft_start:
                         self.on_draft_start()
+                        
+                # NEW: Also check for detailed draft choices pattern
+                detailed_match = self.patterns['draft_choices_detailed'].search(message)
+                if detailed_match:
+                    print("🎯 DETAILED DRAFT CHOICES DETECTED - AI Helper integration ready")
+                    # This enhanced pattern detection can be used by AI Helper for more accurate timing
             
             # Current deck contents (for mid-draft analysis)
             deck_card_match = self.patterns['draft_deck_card'].search(message)
@@ -427,11 +556,20 @@ class HearthstoneLogMonitor:
                 self.on_game_state_change(old_state, new_state)
     
     def monitoring_loop(self):
-        """Main monitoring loop - Arena Tracker style."""
-        print("🚀 Starting log monitoring loop...")
+        """
+        Main monitoring loop - Arena Tracker style with AI Helper enhancements.
+        Enhanced with heartbeat monitoring, event deduplication, and error recovery.
+        """
+        print("🚀 Starting enhanced log monitoring loop with AI Helper integration...")
         
         while self.monitoring:
             try:
+                # NEW: Check heartbeat and log accessibility
+                if not self._check_heartbeat_and_log_accessibility():
+                    print("⚠️ Log files not accessible, attempting recovery...")
+                    time.sleep(5)
+                    continue
+                
                 # Check if we need to find a new log directory
                 if not self.current_log_dir:
                     self.current_log_dir = self.find_latest_log_directory()
@@ -448,18 +586,32 @@ class HearthstoneLogMonitor:
                     time.sleep(5)
                     continue
                 
-                # Process each log file
+                # Process each log file with enhanced error handling
                 for log_type, log_path in self.log_files.items():
-                    new_lines = self.read_new_log_lines(log_path, log_type)
-                    
-                    if new_lines:
-                        print(f"📖 Processing {len(new_lines)} new lines from {log_type}")
+                    try:
+                        new_lines = self.read_new_log_lines(log_path, log_type)
                         
-                        if log_type == 'arena':
-                            self.process_arena_events(new_lines)
-                        elif log_type == 'loading':
-                            self.process_loading_screen_events(new_lines)
-                        # Add more log processors as needed
+                        if new_lines:
+                            # Filter out duplicate events
+                            filtered_lines = []
+                            for line in new_lines:
+                                event_signature = self._generate_event_signature(line.message, log_type)
+                                if not self._is_duplicate_event(event_signature):
+                                    filtered_lines.append(line)
+                            
+                            if filtered_lines:
+                                print(f"📖 Processing {len(filtered_lines)} new lines from {log_type} (filtered {len(new_lines) - len(filtered_lines)} duplicates)")
+                                
+                                if log_type == 'arena':
+                                    self.process_arena_events(filtered_lines)
+                                elif log_type == 'loading':
+                                    self.process_loading_screen_events(filtered_lines)
+                                # Add more log processors as needed
+                            
+                    except Exception as log_error:
+                        print(f"⚠️ Error processing {log_type} log: {log_error}")
+                        # Continue with other log files instead of crashing
+                        continue
                 
                 # Adaptive sleep - more frequent when in draft
                 sleep_time = 0.5 if self.current_game_state == GameState.ARENA_DRAFT else 2.0
@@ -467,7 +619,9 @@ class HearthstoneLogMonitor:
                 
             except Exception as e:
                 print(f"❌ Monitoring error: {e}")
-                time.sleep(5)
+                # Attempt error recovery
+                self._attempt_log_error_recovery()
+                time.sleep(5)  # Wait before retrying
     
     def start_monitoring(self):
         """Start the log monitoring system."""

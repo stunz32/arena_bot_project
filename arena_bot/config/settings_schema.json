@@ -1,0 +1,360 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Arena Bot AI Helper Configuration Schema",
+  "description": "Configuration schema for Arena Bot AI Helper system with validation rules",
+  "type": "object",
+  "required": ["ai_helper", "performance", "security", "ui", "logging"],
+  "properties": {
+    "ai_helper": {
+      "type": "object",
+      "description": "Core AI Helper system configuration",
+      "required": ["enabled", "max_analysis_time", "confidence_threshold"],
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable AI Helper system",
+          "default": true
+        },
+        "max_analysis_time": {
+          "type": "number",
+          "description": "Maximum time for AI analysis in seconds",
+          "minimum": 0.5,
+          "maximum": 10.0,
+          "default": 2.0
+        },
+        "confidence_threshold": {
+          "type": "number",
+          "description": "Minimum confidence threshold for AI recommendations",
+          "minimum": 0.1,
+          "maximum": 1.0,
+          "default": 0.7
+        },
+        "archetype_preference": {
+          "type": "string",
+          "description": "Default archetype preference for draft strategy",
+          "enum": ["balanced", "aggressive", "control", "tempo", "value"],
+          "default": "balanced"
+        },
+        "enable_explanations": {
+          "type": "boolean",
+          "description": "Enable detailed explanations for AI recommendations",
+          "default": true
+        },
+        "enable_visual_overlay": {
+          "type": "boolean",
+          "description": "Enable visual overlay system",
+          "default": true
+        },
+        "fallback_to_legacy": {
+          "type": "boolean",
+          "description": "Allow fallback to legacy AI system on failure",
+          "default": true
+        }
+      }
+    },
+    "performance": {
+      "type": "object",
+      "description": "Performance and resource management settings",
+      "required": ["max_memory_mb", "max_cpu_percent"],
+      "properties": {
+        "max_memory_mb": {
+          "type": "integer",
+          "description": "Maximum memory usage in MB",
+          "minimum": 50,
+          "maximum": 2048,
+          "default": 500
+        },
+        "max_cpu_percent": {
+          "type": "number",
+          "description": "Maximum CPU usage percentage",
+          "minimum": 5,
+          "maximum": 50,
+          "default": 25
+        },
+        "analysis_timeout": {
+          "type": "number",
+          "description": "Timeout for analysis operations in seconds",
+          "minimum": 1.0,
+          "maximum": 30.0,
+          "default": 10.0
+        },
+        "cache_size_mb": {
+          "type": "integer",
+          "description": "Cache size limit in MB",
+          "minimum": 10,
+          "maximum": 200,
+          "default": 50
+        },
+        "enable_monitoring": {
+          "type": "boolean",
+          "description": "Enable performance monitoring",
+          "default": true
+        },
+        "thread_pool_size": {
+          "type": "integer",
+          "description": "Thread pool size for parallel operations",
+          "minimum": 1,
+          "maximum": 16,
+          "default": 4
+        }
+      }
+    },
+    "security": {
+      "type": "object",
+      "description": "Security and privacy settings",
+      "required": ["enable_data_encryption"],
+      "properties": {
+        "enable_data_encryption": {
+          "type": "boolean",
+          "description": "Enable encryption for sensitive data",
+          "default": true
+        },
+        "log_sensitive_data": {
+          "type": "boolean",
+          "description": "Allow logging of sensitive data (NOT recommended)",
+          "default": false
+        },
+        "require_secure_connections": {
+          "type": "boolean",
+          "description": "Require secure connections for external communications",
+          "default": true
+        },
+        "credential_timeout": {
+          "type": "integer",
+          "description": "Credential timeout in seconds",
+          "minimum": 300,
+          "maximum": 86400,
+          "default": 3600
+        },
+        "enable_audit_logging": {
+          "type": "boolean",
+          "description": "Enable security audit logging",
+          "default": true
+        }
+      }
+    },
+    "ui": {
+      "type": "object",
+      "description": "User interface settings",
+      "properties": {
+        "overlay_opacity": {
+          "type": "number",
+          "description": "Visual overlay opacity (0.0 = transparent, 1.0 = opaque)",
+          "minimum": 0.1,
+          "maximum": 1.0,
+          "default": 0.8
+        },
+        "hover_delay_ms": {
+          "type": "integer",
+          "description": "Hover detection delay in milliseconds",
+          "minimum": 100,
+          "maximum": 2000,
+          "default": 500
+        },
+        "font_size": {
+          "type": "integer",
+          "description": "UI font size",
+          "minimum": 8,
+          "maximum": 24,
+          "default": 12
+        },
+        "show_confidence_scores": {
+          "type": "boolean",
+          "description": "Show confidence scores in UI",
+          "default": true
+        },
+        "animation_duration_ms": {
+          "type": "integer",
+          "description": "UI animation duration in milliseconds",
+          "minimum": 0,
+          "maximum": 1000,
+          "default": 300
+        },
+        "theme": {
+          "type": "string",
+          "description": "UI theme selection",
+          "enum": ["light", "dark", "auto"],
+          "default": "auto"
+        }
+      }
+    },
+    "logging": {
+      "type": "object",
+      "description": "Logging configuration",
+      "required": ["level"],
+      "properties": {
+        "level": {
+          "type": "string",
+          "description": "Logging level",
+          "enum": ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+          "default": "INFO"
+        },
+        "max_file_size_mb": {
+          "type": "integer",
+          "description": "Maximum log file size in MB",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 10
+        },
+        "max_files": {
+          "type": "integer",
+          "description": "Maximum number of log files to keep",
+          "minimum": 1,
+          "maximum": 20,
+          "default": 5
+        },
+        "enable_correlation_ids": {
+          "type": "boolean",
+          "description": "Enable correlation IDs for request tracking",
+          "default": true
+        },
+        "enable_performance_logging": {
+          "type": "boolean",
+          "description": "Enable performance metrics logging",
+          "default": true
+        },
+        "log_format": {
+          "type": "string",
+          "description": "Log message format",
+          "enum": ["json", "text"],
+          "default": "json"
+        }
+      }
+    },
+    "development": {
+      "type": "object",
+      "description": "Development and debugging settings",
+      "properties": {
+        "hot_reload_enabled": {
+          "type": "boolean",
+          "description": "Enable configuration hot-reload for development",
+          "default": false
+        },
+        "debug_mode": {
+          "type": "boolean",
+          "description": "Enable debug mode",
+          "default": false
+        },
+        "enable_profiling": {
+          "type": "boolean",
+          "description": "Enable performance profiling",
+          "default": false
+        },
+        "test_mode": {
+          "type": "boolean",
+          "description": "Enable test mode with mock data",
+          "default": false
+        },
+        "save_debug_screenshots": {
+          "type": "boolean",
+          "description": "Save debug screenshots for analysis",
+          "default": false
+        }
+      }
+    },
+    "card_evaluation": {
+      "type": "object",
+      "description": "Card evaluation algorithm settings",
+      "properties": {
+        "enable_ml_models": {
+          "type": "boolean",
+          "description": "Enable machine learning models for card evaluation",
+          "default": true
+        },
+        "ml_model_timeout": {
+          "type": "number",
+          "description": "ML model loading timeout in seconds",
+          "minimum": 5.0,
+          "maximum": 60.0,
+          "default": 30.0
+        },
+        "fallback_to_heuristics": {
+          "type": "boolean",
+          "description": "Use heuristic fallback when ML models fail",
+          "default": true
+        },
+        "cache_evaluations": {
+          "type": "boolean",
+          "description": "Cache card evaluation results",
+          "default": true
+        },
+        "evaluation_weights": {
+          "type": "object",
+          "description": "Weights for different evaluation dimensions",
+          "properties": {
+            "base_value": {
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 1.0,
+              "default": 0.3
+            },
+            "tempo_score": {
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 1.0,
+              "default": 0.25
+            },
+            "value_score": {
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 1.0,
+              "default": 0.2
+            },
+            "synergy_score": {
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 1.0,
+              "default": 0.15
+            },
+            "curve_score": {
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 1.0,
+              "default": 0.1
+            }
+          }
+        }
+      }
+    },
+    "overlay": {
+      "type": "object",
+      "description": "Visual overlay system settings",
+      "properties": {
+        "enable_click_through": {
+          "type": "boolean",
+          "description": "Enable click-through overlay functionality",
+          "default": true
+        },
+        "frame_rate_limit": {
+          "type": "integer",
+          "description": "Maximum overlay frame rate (FPS)",
+          "minimum": 10,
+          "maximum": 60,
+          "default": 30
+        },
+        "position_offset_x": {
+          "type": "integer",
+          "description": "Horizontal offset for overlay positioning",
+          "minimum": -100,
+          "maximum": 100,
+          "default": 0
+        },
+        "position_offset_y": {
+          "type": "integer",
+          "description": "Vertical offset for overlay positioning",
+          "minimum": -100,
+          "maximum": 100,
+          "default": 0
+        },
+        "auto_hide_delay": {
+          "type": "integer",
+          "description": "Auto-hide delay in seconds (0 = never hide)",
+          "minimum": 0,
+          "maximum": 300,
+          "default": 30
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}

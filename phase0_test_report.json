@@ -1,0 +1,83 @@
+{
+  "timestamp": "2025-07-28 11:31:30",
+  "phase": "Phase 0 - Foundation & Risk Mitigation",
+  "summary": {
+    "total_test_suites": 4,
+    "successful_suites": 1,
+    "suite_success_rate": 25.0,
+    "total_duration_seconds": 8.414,
+    "total_tests": 24,
+    "passed_tests": 24,
+    "failed_tests": 0,
+    "error_tests": 0,
+    "skipped_tests": 0,
+    "test_pass_rate": 100.0
+  },
+  "quality_gates": {
+    "min_pass_rate": 90.0,
+    "min_suite_success_rate": 80.0,
+    "max_duration_seconds": 300.0,
+    "pass_rate_met": true,
+    "suite_success_rate_met": false,
+    "duration_met": true,
+    "overall_quality_gate": false
+  },
+  "suite_details": [
+    {
+      "name": "test_data_models.py",
+      "success": true,
+      "duration": 1.175,
+      "stats": {
+        "total_tests": 0,
+        "passed": 0,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0,
+        "warnings": 0
+      },
+      "return_code": 0
+    },
+    {
+      "name": "test_config_manager.py",
+      "success": false,
+      "duration": 1.425,
+      "stats": {
+        "total_tests": 0,
+        "passed": 0,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0,
+        "warnings": 0
+      },
+      "return_code": 2
+    },
+    {
+      "name": "test_monitoring.py",
+      "success": false,
+      "duration": 3.53,
+      "stats": {
+        "total_tests": 24,
+        "passed": 24,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0,
+        "warnings": 0
+      },
+      "return_code": 1
+    },
+    {
+      "name": "test_dependency_validation.py",
+      "success": false,
+      "duration": 2.284,
+      "stats": {
+        "total_tests": 0,
+        "passed": 0,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0,
+        "warnings": 2
+      },
+      "return_code": 1
+    }
+  ]
+}

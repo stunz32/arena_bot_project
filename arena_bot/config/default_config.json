@@ -1,0 +1,70 @@
+{
+  "version": "2.0.0",
+  "ai_helper": {
+    "enabled": true,
+    "max_analysis_time": 2.0,
+    "confidence_threshold": 0.7,
+    "archetype_preference": "balanced",
+    "enable_explanations": true,
+    "enable_visual_overlay": true,
+    "fallback_to_legacy": true
+  },
+  "performance": {
+    "max_memory_mb": 500,
+    "max_cpu_percent": 25,
+    "analysis_timeout": 10.0,
+    "cache_size_mb": 50,
+    "enable_monitoring": true,
+    "thread_pool_size": 4
+  },
+  "security": {
+    "enable_data_encryption": true,
+    "log_sensitive_data": false,
+    "require_secure_connections": true,
+    "credential_timeout": 3600,
+    "enable_audit_logging": true
+  },
+  "ui": {
+    "overlay_opacity": 0.8,
+    "hover_delay_ms": 500,
+    "font_size": 12,
+    "show_confidence_scores": true,
+    "animation_duration_ms": 300,
+    "theme": "auto"
+  },
+  "logging": {
+    "level": "INFO",
+    "max_file_size_mb": 10,
+    "max_files": 5,
+    "enable_correlation_ids": true,
+    "enable_performance_logging": true,
+    "log_format": "json"
+  },
+  "development": {
+    "hot_reload_enabled": false,
+    "debug_mode": false,
+    "enable_profiling": false,
+    "test_mode": false,
+    "save_debug_screenshots": false
+  },
+  "card_evaluation": {
+    "enable_ml_models": true,
+    "ml_model_timeout": 30.0,
+    "fallback_to_heuristics": true,
+    "cache_evaluations": true,
+    "evaluation_weights": {
+      "base_value": 0.3,
+      "tempo_score": 0.25,
+      "value_score": 0.2,
+      "synergy_score": 0.15,
+      "curve_score": 0.1
+    }
+  },
+  "overlay": {
+    "enable_click_through": true,
+    "frame_rate_limit": 30,
+    "position_offset_x": 0,
+    "position_offset_y": 0,
+    "auto_hide_delay": 30
+  }
+}
