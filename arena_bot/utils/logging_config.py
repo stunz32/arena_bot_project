@@ -6,8 +6,74 @@ Following CLAUDE.md principles - minimal, focused, and easy to understand.
 
 import logging
 import logging.handlers
+import io
+import sys
 from pathlib import Path
 from datetime import datetime
+
+
+class SafeUnicodeFormatter(logging.Formatter):
+    """
+    Enhanced formatter that safely handles Unicode characters.
+    Converts problematic Unicode to ASCII-safe alternatives for maximum compatibility.
+    """
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        
+        # Unicode to ASCII-safe mappings for common characters
+        self.unicode_replacements = {
+            '✅': '[OK]',
+            '❌': '[ERROR]', 
+            '⚠️': '[WARNING]',
+            '🎯': '[TARGET]',
+            '📁': '[FOLDER]',
+            '🔍': '[SEARCH]',
+            '💔': '[FAILED]',
+            '💓': '[HEARTBEAT]',
+            '🚀': '[START]',
+            '⏸️': '[STOP]',
+            '🎮': '[GAME]',
+            '📂': '[DIR]',
+            '🔄': '[PROCESSING]',
+            '📖': '[READING]',
+            '🏠': '[MENU]',
+            '⚔️': '[BATTLE]',
+            '📚': '[COLLECTION]',
+            '🏆': '[TOURNAMENT]',
+            '🥊': '[BATTLEGROUNDS]',
+            '🗺️': '[ADVENTURE]',
+            '🍺': '[TAVERN_BRAWL]',
+            '🛒': '[SHOP]',
+            '👑': '[HERO]',
+            '📋': '[DECK]',
+            '✨': '[PREMIUM]',
+            '🔐': '[LOGIN]',
+        }
+    
+    def format(self, record):
+        """Format log record with safe Unicode handling."""
+        try:
+            # Get the formatted message
+            formatted = super().format(record)
+            
+            # Replace problematic Unicode characters
+            for unicode_char, ascii_replacement in self.unicode_replacements.items():
+                formatted = formatted.replace(unicode_char, ascii_replacement)
+                
+            return formatted
+            
+        except UnicodeEncodeError:
+            # Fallback: encode to ASCII with replacement
+            try:
+                formatted = super().format(record)
+                return formatted.encode('ascii', errors='replace').decode('ascii')
+            except Exception:
+                # Ultimate fallback: basic message
+                return f"{record.levelname}: {str(record.msg)}"
+        except Exception as e:
+            # Handle any other formatting errors
+            return f"LOGGING_ERROR: {str(e)} - Original: {str(record.msg)}"
 
 
 def setup_logging(log_level=logging.INFO):
@@ -30,20 +96,67 @@ def setup_logging(log_level=logging.INFO):
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     
-    # Console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(log_level)
-    console_handler.setFormatter(formatter)
-    # Set UTF-8 encoding to handle emoji characters
-    if hasattr(console_handler.stream, 'reconfigure'):
-        console_handler.stream.reconfigure(encoding='utf-8')
+    # ENHANCED: Robust console handler with multi-strategy UTF-8 setup
+    console_handler = None
+    encoding_success = False
     
-    # File handler (with rotation)
-    file_handler = logging.handlers.RotatingFileHandler(
-        log_file, maxBytes=10*1024*1024, backupCount=5, encoding='utf-8'
+    # Strategy 1: Try StreamHandler with explicit UTF-8 encoding (Python 3.7+)
+    try:
+        if sys.version_info >= (3, 7):
+            console_handler = logging.StreamHandler(sys.stdout)
+            console_handler.setLevel(log_level)
+            
+            # Try modern reconfigure method
+            if hasattr(console_handler.stream, 'reconfigure'):
+                console_handler.stream.reconfigure(encoding='utf-8', errors='replace')
+                encoding_success = True
+            elif hasattr(console_handler.stream, 'buffer'):
+                # Strategy 2: TextIOWrapper approach for older versions
+                console_handler.stream = io.TextIOWrapper(
+                    console_handler.stream.buffer, 
+                    encoding='utf-8', 
+                    errors='replace',
+                    newline='\n'
+                )
+                encoding_success = True
+    except (AttributeError, OSError, TypeError) as e:
+        # UTF-8 setup failed, will use fallback
+        pass
+    
+    # Strategy 3: Fallback to basic StreamHandler with safe formatter
+    if not console_handler or not encoding_success:
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(log_level)
+    
+    # Use SafeUnicodeFormatter for maximum compatibility
+    safe_formatter = SafeUnicodeFormatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
-    file_handler.setLevel(log_level)
-    file_handler.setFormatter(formatter)
+    console_handler.setFormatter(safe_formatter)
+    
+    # ENHANCED: File handler with robust UTF-8 encoding and error handling
+    try:
+        file_handler = logging.handlers.RotatingFileHandler(
+            log_file, 
+            maxBytes=10*1024*1024, 
+            backupCount=5, 
+            encoding='utf-8',
+            errors='replace'  # Handle encoding errors gracefully
+        )
+        file_handler.setLevel(log_level)
+        file_handler.setFormatter(formatter)
+    except (OSError, UnicodeError) as e:
+        # Fallback: Use basic file handler with ASCII-safe formatter
+        file_handler = logging.handlers.RotatingFileHandler(
+            log_file, 
+            maxBytes=10*1024*1024, 
+            backupCount=5, 
+            encoding='ascii',
+            errors='replace'
+        )
+        file_handler.setLevel(log_level)
+        file_handler.setFormatter(safe_formatter)
+        print(f"Warning: File logging using ASCII fallback due to: {e}")
     
     # Configure root logger
     root_logger = logging.getLogger()

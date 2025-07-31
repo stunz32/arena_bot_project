@@ -6,6 +6,7 @@ Based on Arena Tracker's proven log monitoring methodology.
 """
 
 import os
+import sys
 import time
 import re
 import hashlib  # NEW: For event deduplication signatures
@@ -15,6 +16,13 @@ from typing import Dict, List, Optional, Tuple
 import threading
 from dataclasses import dataclass
 from enum import Enum
+
+try:
+    import winreg  # For Windows registry access
+except ImportError:
+    winreg = None  # Not available on non-Windows platforms
+    
+from logging_config import setup_logging, get_platform_info
 
 class GameState(Enum):
     """Game state detection from logs."""
@@ -54,9 +62,14 @@ class HearthstoneLogMonitor:
     Uses Arena Tracker's proven methodology for maximum accuracy.
     """
     
-    def __init__(self, logs_base_path: str = "/mnt/m/Hearthstone/Logs"):
-        """Initialize the log monitor."""
-        self.logs_base_path = Path(logs_base_path)
+    def __init__(self, logs_base_path: Optional[str] = None):
+        """Initialize the log monitor with intelligent path detection."""
+        # Set up logging first
+        self.logger = setup_logging(console_output=True)
+        
+        # Intelligent path resolution
+        self.logs_base_path = self._resolve_hearthstone_logs_path(logs_base_path)
+        self.platform_info = get_platform_info()
         self.current_log_dir: Optional[Path] = None
         self.log_files: Dict[str, Path] = {}
         self.log_positions: Dict[str, int] = {}
@@ -95,8 +108,9 @@ class HearthstoneLogMonitor:
             'asset_load': re.compile(r'AssetLoader.*Loading.*([A-Z0-9_]+)'),
         }
         
-        print("🎯 Hearthstone Log Monitor Initialized")
-        print(f"📁 Monitoring: {self.logs_base_path}")
+        self.logger.info("🎯 Hearthstone Log Monitor Initialized")
+        self.logger.info(f"📁 Monitoring: {self.logs_base_path}")
+        self.logger.info(f"🖥️ Platform: {self.platform_info['platform']}")
     
     def _generate_event_signature(self, message: str, component: str) -> str:
         """
@@ -152,25 +166,45 @@ class HearthstoneLogMonitor:
         if (now - self.last_heartbeat).seconds >= self.heartbeat_interval:
             self.last_heartbeat = now
             
-            # Check log file accessibility
+            # Check log file accessibility with multi-file resilience
             try:
                 if self.current_log_dir and self.current_log_dir.exists():
-                    # Try to read from a log file to verify accessibility
-                    test_files = list(self.log_files.values())[:1]  # Test first available log file
-                    if test_files:
-                        test_file = test_files[0]
-                        if test_file.exists() and os.access(test_file, os.R_OK):
+                    # Test multiple files for resilience against temporary locks
+                    accessible_files = 0
+                    total_files = len(self.log_files)
+                    
+                    if total_files > 0:
+                        for log_type, log_path in self.log_files.items():
+                            if log_path.exists() and os.access(log_path, os.R_OK):
+                                # Additional test: try to actually read from file to detect locks
+                                try:
+                                    with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
+                                        f.read(100)  # Read first 100 chars to test actual accessibility
+                                    accessible_files += 1
+                                    self.logger.debug(f"✅ {log_type} accessible")
+                                except (OSError, PermissionError, IOError):
+                                    self.logger.debug(f"⚠️ {log_type} read-locked or inaccessible")
+                                    continue
+                        
+                        # Require at least 30% of files accessible (resilient threshold)  
+                        accessibility_ratio = accessible_files / total_files
+                        if accessibility_ratio >= 0.3:
                             self.log_file_accessible = True
                             self.error_recovery_attempts = 0  # Reset error counter on success
+                            self.logger.debug(f"💓 Multi-file check passed - {accessible_files}/{total_files} files accessible ({accessibility_ratio:.1%})")
                         else:
                             self.log_file_accessible = False
+                            self.logger.warning(f"💔 Multi-file check failed - Only {accessible_files}/{total_files} files accessible ({accessibility_ratio:.1%})")
+                            self._diagnose_heartbeat_failure()
                     else:
                         self.log_file_accessible = False
+                        self.logger.error("💔 No log files discovered for accessibility testing")
                 else:
                     self.log_file_accessible = False
+                    self.logger.error(f"💔 Log directory inaccessible: {self.current_log_dir}")
                     
             except Exception as e:
-                print(f"⚠️ Heartbeat check failed: {e}")
+                self.logger.warning(f"⚠️ Heartbeat check failed: {e}")
                 self.log_file_accessible = False
                 self.error_recovery_attempts += 1
                 
@@ -180,100 +214,494 @@ class HearthstoneLogMonitor:
             
             # Log heartbeat status
             if self.log_file_accessible:
-                print(f"💓 Heartbeat OK - Log files accessible at {now.strftime('%H:%M:%S')}")
+                self.logger.info(f"💓 Heartbeat OK - Log files accessible at {now.strftime('%H:%M:%S')}")
             else:
-                print(f"💔 Heartbeat FAILED - Log files inaccessible at {now.strftime('%H:%M:%S')}")
+                self.logger.error(f"💔 Heartbeat FAILED - Log files inaccessible at {now.strftime('%H:%M:%S')}")
         
         return self.log_file_accessible
     
+    def _diagnose_heartbeat_failure(self):
+        """
+        Detailed diagnostics for heartbeat failures.
+        Provides comprehensive information about what specifically is failing.
+        """
+        self.logger.error("🔍 HEARTBEAT FAILURE DIAGNOSTICS:")
+        self.logger.error(f"  Base path: {self.logs_base_path} (exists: {self.logs_base_path.exists()})")
+        
+        if self.current_log_dir:
+            self.logger.error(f"  Current log dir: {self.current_log_dir} (exists: {self.current_log_dir.exists()})")
+            
+            if self.current_log_dir.exists():
+                try:
+                    dir_contents = list(self.current_log_dir.glob("*.log"))
+                    self.logger.error(f"  Log files in directory: {len(dir_contents)}")
+                    for log_file in dir_contents[:5]:  # Show first 5 files
+                        stat = log_file.stat()
+                        age_minutes = (datetime.now() - datetime.fromtimestamp(stat.st_mtime)).total_seconds() / 60
+                        self.logger.error(f"    {log_file.name}: {stat.st_size} bytes, {age_minutes:.1f}min old")
+                except Exception as e:
+                    self.logger.error(f"  Error reading log directory: {e}")
+        else:
+            self.logger.error("  Current log dir: None")
+        
+        self.logger.error(f"  Discovered log files: {len(self.log_files)}")
+        for log_type, log_path in self.log_files.items():
+            exists = log_path.exists()
+            if exists:
+                try:
+                    stat = log_path.stat()
+                    readable = os.access(log_path, os.R_OK)
+                    age_minutes = (datetime.now() - datetime.fromtimestamp(stat.st_mtime)).total_seconds() / 60
+                    
+                    # Test actual read capability
+                    read_test = "UNKNOWN"
+                    try:
+                        with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            f.read(50)
+                        read_test = "SUCCESS"
+                    except Exception as e:
+                        read_test = f"FAILED ({type(e).__name__})"
+                    
+                    self.logger.error(f"    {log_type}: exists=✅, size={stat.st_size}B, age={age_minutes:.1f}min, readable={readable}, read_test={read_test}")
+                except Exception as e:
+                    self.logger.error(f"    {log_type}: exists=✅, stat_error={e}")
+            else:
+                self.logger.error(f"    {log_type}: exists=❌, path={log_path}")
+        
+        # Check if this might be a session transition
+        if self.logs_base_path.exists():
+            try:
+                recent_dirs = []
+                for item in self.logs_base_path.iterdir():
+                    if item.is_dir() and item.name.startswith("Hearthstone_"):
+                        age = datetime.now() - datetime.fromtimestamp(item.stat().st_mtime)
+                        if age.total_seconds() < 300:  # Within last 5 minutes
+                            recent_dirs.append((item, age.total_seconds()))
+                
+                if recent_dirs:
+                    self.logger.error(f"  Recent Hearthstone directories found: {len(recent_dirs)}")
+                    for dir_path, age_seconds in recent_dirs:
+                        self.logger.error(f"    {dir_path.name}: {age_seconds:.1f}s ago")
+                else:
+                    self.logger.error("  No recent Hearthstone directories found - possible session transition")
+            except Exception as e:
+                self.logger.error(f"  Error checking for recent directories: {e}")
+    
     def _attempt_log_error_recovery(self):
         """
-        Attempt to recover from log parsing errors or accessibility issues.
-        Implements log parsing error recovery mechanisms.
+        Enhanced recovery with detailed diagnostics and multiple recovery strategies.
+        Implements intelligent recovery based on failure patterns.
         """
-        print(f"🔄 Attempting log error recovery (attempt {self.error_recovery_attempts}/{self.max_error_recovery_attempts})")
+        self.logger.info(f"🔄 Attempting log error recovery (attempt {self.error_recovery_attempts}/{self.max_error_recovery_attempts})")
         
         try:
-            # Try to re-discover log directory
+            # Diagnose the specific issue first
+            if not self.logs_base_path.exists():
+                self.logger.error(f"❌ Base path doesn't exist: {self.logs_base_path}")
+                # Try to re-resolve base path
+                old_path = self.logs_base_path
+                self.logs_base_path = self._resolve_hearthstone_logs_path()
+                self.logger.info(f"🔄 Path resolution: {old_path} → {self.logs_base_path}")
+                
+                if not self.logs_base_path.exists():
+                    self.logger.error("❌ Path re-resolution failed - base path still doesn't exist")
+                    return False
+            
+            # Re-discover log directory with enhanced validation
+            old_log_dir = self.current_log_dir
             self.current_log_dir = self.find_latest_log_directory()
             
             if self.current_log_dir:
+                self.logger.info(f"🔄 Log directory: {old_log_dir} → {self.current_log_dir}")
+                
                 # Re-discover log files
+                old_file_count = len(self.log_files)
                 self.log_files = self.discover_log_files(self.current_log_dir)
-                # Reset log positions to avoid reading stale data
+                new_file_count = len(self.log_files)
+                
+                self.logger.info(f"✅ Recovery successful - {old_file_count} → {new_file_count} log files")
+                
+                # Reset positions to read from current position, not from beginning
                 self.log_positions = {}
-                print("✅ Log error recovery successful - found new log directory")
+                
+                # Validate that we can actually access the new files
+                accessible_files = 0
+                for log_type, log_path in self.log_files.items():
+                    if log_path.exists() and os.access(log_path, os.R_OK):
+                        try:
+                            with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
+                                f.read(50)  # Test read
+                            accessible_files += 1
+                        except:
+                            continue
+                
+                if accessible_files > 0:
+                    self.logger.info(f"✅ Recovery validation passed - {accessible_files}/{new_file_count} files accessible")
+                    return True
+                else:
+                    self.logger.error(f"❌ Recovery validation failed - no files accessible")
+                    return False
             else:
-                print("❌ Log error recovery failed - no log directory found")
+                self.logger.error("❌ Recovery failed - no log directory found")
+                
+                # Try to diagnose why no directory was found
+                if self.logs_base_path.exists():
+                    try:
+                        all_dirs = [item for item in self.logs_base_path.iterdir() if item.is_dir()]
+                        hs_dirs = [item for item in all_dirs if item.name.startswith("Hearthstone_")]
+                        self.logger.error(f"  Base path has {len(all_dirs)} directories, {len(hs_dirs)} Hearthstone directories")
+                        
+                        if hs_dirs:
+                            # Show the most recent directories
+                            hs_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+                            for i, dir_path in enumerate(hs_dirs[:3]):
+                                age = datetime.now() - datetime.fromtimestamp(dir_path.stat().st_mtime)
+                                self.logger.error(f"    #{i+1}: {dir_path.name} ({age.total_seconds()/60:.1f}min ago)")
+                    except Exception as e:
+                        self.logger.error(f"  Error analyzing base path: {e}")
+                
+                return False
                 
         except Exception as e:
-            print(f"❌ Log error recovery failed: {e}")
+            self.logger.error(f"❌ Recovery failed with exception: {e}")
+            return False
+    
+    def _resolve_hearthstone_logs_path(self, custom_path: Optional[str] = None) -> Path:
+        """
+        Intelligently resolve Hearthstone logs path across platforms.
+        
+        Args:
+            custom_path: User-specified path (optional)
+            
+        Returns:
+            Path: Resolved logs base path
+        """
+        if custom_path:
+            return Path(custom_path)
+        
+        # Platform-specific path resolution strategies
+        if sys.platform.startswith('win'):
+            return self._resolve_windows_logs_path()
+        else:
+            return self._resolve_linux_wsl_logs_path()
+    
+    def _resolve_windows_logs_path(self) -> Path:
+        """
+        Resolve Hearthstone logs path on Windows using multiple strategies.
+        
+        Returns:
+            Path: Windows logs path
+        """
+        strategies = [
+            self._get_hearthstone_install_from_registry,
+            self._get_hearthstone_install_from_common_paths,
+            self._get_hearthstone_install_from_env_vars,
+        ]
+        
+        for strategy in strategies:
+            try:
+                install_path = strategy()
+                if install_path:
+                    logs_path = install_path / "Logs"
+                    if logs_path.exists():
+                        self.logger.info(f"✅ Found Windows Hearthstone logs: {logs_path}")
+                        return logs_path
+            except Exception as e:
+                self.logger.debug(f"Strategy failed: {strategy.__name__}: {e}")
+                continue
+        
+        # Final fallback for Windows
+        fallback_paths = [
+            Path("M:/Hearthstone/Logs"),
+            Path("C:/Program Files (x86)/Hearthstone/Logs"),
+            Path(os.path.expanduser("~/AppData/Local/Blizzard/Hearthstone/Logs")),
+        ]
+        
+        for path in fallback_paths:
+            if path.exists():
+                self.logger.info(f"✅ Found fallback Windows path: {path}")
+                return path
+        
+        self.logger.warning("⚠️ No Windows Hearthstone logs found, using default")
+        return Path("M:/Hearthstone/Logs")
+    
+    def _resolve_linux_wsl_logs_path(self) -> Path:
+        """
+        Resolve Hearthstone logs path on Linux/WSL.
+        
+        Returns:
+            Path: Linux/WSL logs path
+        """
+        wsl_paths = [
+            Path("/mnt/m/Hearthstone/Logs"),
+            Path("/mnt/c/Program Files (x86)/Hearthstone/Logs"),
+            Path("/mnt/d/Games/Hearthstone/Logs"),
+        ]
+        
+        for path in wsl_paths:
+            if path.exists():
+                self.logger.info(f"✅ Found WSL Hearthstone logs: {path}")
+                return path
+        
+        self.logger.warning("⚠️ No WSL Hearthstone logs found, using default")
+        return Path("/mnt/m/Hearthstone/Logs")
+    
+    def _get_hearthstone_install_from_registry(self) -> Optional[Path]:
+        """
+        Get Hearthstone installation path from Windows registry.
+        
+        Returns:
+            Optional[Path]: Installation path if found
+        """
+        if not sys.platform.startswith('win'):
+            return None
+        
+        try:
+            import winreg
+            
+            # Try multiple registry locations
+            registry_paths = [
+                (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Blizzard Entertainment\Hearthstone"),
+                (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Blizzard Entertainment\Hearthstone"),
+                (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Blizzard Entertainment\Hearthstone"),
+            ]
+            
+            for hkey, subkey in registry_paths:
+                try:
+                    with winreg.OpenKey(hkey, subkey) as key:
+                        install_path, _ = winreg.QueryValueEx(key, "InstallPath")
+                        path = Path(install_path)
+                        if path.exists():
+                            self.logger.info(f"✅ Found Hearthstone via registry: {path}")
+                            return path
+                except (FileNotFoundError, OSError):
+                    continue
+            
+            return None
+            
+        except ImportError:
+            self.logger.debug("winreg not available (not on Windows)")
+            return None
+        except Exception as e:
+            self.logger.debug(f"Registry lookup failed: {e}")
+            return None
+    
+    def _get_hearthstone_install_from_common_paths(self) -> Optional[Path]:
+        """
+        Check common Hearthstone installation paths.
+        
+        Returns:
+            Optional[Path]: Installation path if found
+        """
+        if sys.platform.startswith('win'):
+            common_paths = [
+                Path("C:/Program Files (x86)/Hearthstone"),
+                Path("C:/Program Files/Hearthstone"),
+                Path("D:/Games/Hearthstone"),
+                Path("E:/Games/Hearthstone"),
+            ]
+        else:
+            common_paths = [
+                Path("/mnt/c/Program Files (x86)/Hearthstone"),
+                Path("/mnt/d/Games/Hearthstone"),
+                Path("/mnt/e/Games/Hearthstone"),
+            ]
+        
+        for path in common_paths:
+            if path.exists() and (path / "Hearthstone.exe").exists():
+                self.logger.info(f"✅ Found Hearthstone in common path: {path}")
+                return path
+        
+        return None
+    
+    def _get_hearthstone_install_from_env_vars(self) -> Optional[Path]:
+        """
+        Check environment variables for Hearthstone path.
+        
+        Returns:
+            Optional[Path]: Installation path if found
+        """
+        env_vars = ['HEARTHSTONE_PATH', 'HS_PATH', 'HEARTHSTONE_INSTALL']
+        
+        for var in env_vars:
+            path_str = os.environ.get(var)
+            if path_str:
+                path = Path(path_str)
+                if path.exists():
+                    self.logger.info(f"✅ Found Hearthstone via {var}: {path}")
+                    return path
+        
+        return None
     
     def find_latest_log_directory(self) -> Optional[Path]:
         """
-        Find the most recent Hearthstone log directory.
-        Directories are named like: Hearthstone_2025_07_11_12_15_01
+        ENHANCED: Robust log directory discovery with multi-platform support.
+        
+        Uses the actual user-provided directory structure as highest priority,
+        then falls back to standard detection methods.
+        
+        Returns:
+            Optional[Path]: Path to most recent timestamped log directory, or None if not found
         """
-        # Try different path formats for WSL compatibility
-        possible_paths = [
-            self.logs_base_path,
-            Path("/mnt/m/Hearthstone/Logs"),
-            Path("M:/Hearthstone/Logs"),
+        
+        # Priority-ordered base path candidates (user's actual path first)
+        base_path_candidates = [
+            Path("M:/Hearthstone/Logs"),              # User's confirmed working path
+            Path("/mnt/m/Hearthstone/Logs"),          # WSL equivalent of M: drive
+            Path("/mnt/c/Program Files (x86)/Hearthstone/Logs"),  # Standard installation
+            Path(os.path.expanduser("~/AppData/Local/Blizzard/Hearthstone/Logs")),  # Windows user path
+            self.logs_base_path if hasattr(self, 'logs_base_path') else None,  # Current detected path
         ]
         
-        working_path = None
-        for path_to_try in possible_paths:
+        # Remove None entries
+        base_path_candidates = [p for p in base_path_candidates if p is not None]
+        
+        self.logger.info(f"🔍 Searching {len(base_path_candidates)} base path candidates...")
+        
+        for i, candidate_path in enumerate(base_path_candidates):
+            self.logger.debug(f"  Candidate #{i+1}: {candidate_path}")
+            
             try:
-                if path_to_try.exists():
-                    working_path = path_to_try
-                    self.logs_base_path = working_path
-                    print(f"✅ Found working log path: {working_path}")
-                    break
+                if not candidate_path.exists():
+                    self.logger.debug(f"    ❌ Path does not exist")
+                    continue
+                    
+                if not candidate_path.is_dir():
+                    self.logger.debug(f"    ❌ Path is not a directory")
+                    continue
+                
+                self.logger.debug(f"    ✅ Path exists and is accessible")
+                
+                # Scan for timestamped Hearthstone directories
+                timestamped_dirs = self._scan_timestamped_directories(candidate_path)
+                
+                if timestamped_dirs:
+                    self.logger.info(f"✅ Found {len(timestamped_dirs)} timestamped directories in: {candidate_path}")
+                    
+                    # Update our base path to the successful candidate
+                    self.logs_base_path = candidate_path
+                    
+                    # Return the most recent directory
+                    most_recent = self._select_most_recent_directory(timestamped_dirs)
+                    self.logger.info(f"📂 Selected most recent: {most_recent.name}")
+                    return most_recent
+                else:
+                    self.logger.debug(f"    ⚠️ No timestamped directories found")
+                    
             except (OSError, PermissionError) as e:
-                print(f"⚠️ Cannot access {path_to_try}: {e}")
+                self.logger.debug(f"    ❌ Access error: {e}")
+                continue
+            except Exception as e:
+                self.logger.warning(f"    ❌ Unexpected error: {e}")
                 continue
         
-        if not working_path:
-            print(f"❌ No accessible log directory found")
-            return None
+        # All candidates failed
+        self.logger.error("❌ No valid Hearthstone log directories found in any candidate path")
+        self._diagnose_discovery_failure(base_path_candidates)
+        return None
+    
+    def _scan_timestamped_directories(self, base_path: Path) -> List[Tuple[datetime, Path]]:
+        """
+        Scan a base directory for Hearthstone timestamped subdirectories.
         
-        # Find all Hearthstone log directories
-        log_dirs = []
+        Args:
+            base_path: The directory to scan
+            
+        Returns:
+            List of (timestamp, path) tuples for valid directories
+        """
+        timestamped_dirs = []
+        
         try:
-            for item in self.logs_base_path.iterdir():
-                if item.is_dir() and item.name.startswith("Hearthstone_"):
-                    try:
-                        # Extract timestamp from directory name
-                        parts = item.name.split("_")
-                        if len(parts) >= 6:
-                            year, month, day, hour, minute, second = parts[1:7]
-                            timestamp = datetime(
-                                int(year), int(month), int(day),
-                                int(hour), int(minute), int(second)
-                            )
-                            log_dirs.append((timestamp, item))
-                    except (ValueError, IndexError):
-                        continue
+            for item in base_path.iterdir():
+                if not item.is_dir():
+                    continue
+                    
+                # Check if directory name matches Hearthstone pattern
+                if not item.name.startswith("Hearthstone_"):
+                    continue
+                
+                # Parse timestamp from directory name: Hearthstone_YYYY_MM_DD_HH_MM_SS
+                try:
+                    parts = item.name.split("_")
+                    if len(parts) >= 6:
+                        year, month, day, hour, minute, second = parts[1:7]
+                        timestamp = datetime(
+                            int(year), int(month), int(day),
+                            int(hour), int(minute), int(second)
+                        )
+                        timestamped_dirs.append((timestamp, item))
+                        self.logger.debug(f"    📁 Found valid directory: {item.name} ({timestamp})")
+                    else:
+                        self.logger.debug(f"    ⚠️ Invalid directory name format: {item.name}")
+                except (ValueError, IndexError) as e:
+                    self.logger.debug(f"    ⚠️ Failed to parse timestamp from {item.name}: {e}")
+                    continue
+                    
         except (OSError, PermissionError) as e:
-            print(f"❌ Cannot iterate log directories: {e}")
-            return None
+            self.logger.error(f"❌ Cannot scan directory {base_path}: {e}")
+            return []
         
-        if not log_dirs:
-            print("❌ No valid Hearthstone log directories found")
-            return None
+        return timestamped_dirs
+    
+    def _select_most_recent_directory(self, timestamped_dirs: List[Tuple[datetime, Path]]) -> Path:
+        """
+        Select the most recent directory from a list of timestamped directories.
         
-        # Sort by timestamp and get the most recent
-        log_dirs.sort(key=lambda x: x[0], reverse=True)
-        latest_timestamp, latest_dir = log_dirs[0]
+        Args:
+            timestamped_dirs: List of (timestamp, path) tuples
+            
+        Returns:
+            Path: The most recent directory
+        """
+        # Sort by timestamp (most recent first)
+        timestamped_dirs.sort(key=lambda x: x[0], reverse=True)
         
-        # Check if the latest directory is recent (within last 24 hours)
-        if datetime.now() - latest_timestamp > timedelta(hours=24):
-            print(f"⚠️ Latest log directory is old: {latest_timestamp}")
+        most_recent_timestamp, most_recent_path = timestamped_dirs[0]
         
-        print(f"📂 Found latest log directory: {latest_dir.name}")
-        print(f"🕒 Timestamp: {latest_timestamp}")
+        # Check if the most recent directory is reasonably fresh
+        age = datetime.now() - most_recent_timestamp
+        if age > timedelta(hours=24):
+            self.logger.warning(f"⚠️ Most recent log directory is {age.total_seconds()/3600:.1f} hours old")
+        else:
+            self.logger.info(f"✅ Most recent directory is {age.total_seconds()/60:.1f} minutes old")
         
-        return latest_dir
+        return most_recent_path
+    
+    def _diagnose_discovery_failure(self, attempted_paths: List[Path]):
+        """
+        Provide detailed diagnostics when directory discovery fails.
+        
+        Args:
+            attempted_paths: List of paths that were attempted
+        """
+        self.logger.error("🔍 DIRECTORY DISCOVERY FAILURE DIAGNOSTICS:")
+        
+        for i, path in enumerate(attempted_paths):
+            self.logger.error(f"  Candidate #{i+1}: {path}")
+            
+            if path.exists():
+                self.logger.error(f"    Status: EXISTS")
+                try:
+                    if path.is_dir():
+                        contents = list(path.iterdir())
+                        dirs = [item for item in contents if item.is_dir()]
+                        hs_dirs = [item for item in dirs if item.name.startswith("Hearthstone_")]
+                        
+                        self.logger.error(f"    Contents: {len(contents)} items, {len(dirs)} directories")
+                        self.logger.error(f"    Hearthstone dirs: {len(hs_dirs)}")
+                        
+                        if hs_dirs:
+                            # Show first few directories
+                            for j, hs_dir in enumerate(hs_dirs[:3]):
+                                age_seconds = (datetime.now() - datetime.fromtimestamp(hs_dir.stat().st_mtime)).total_seconds()
+                                self.logger.error(f"      #{j+1}: {hs_dir.name} ({age_seconds/60:.1f}min ago)")
+                    else:
+                        self.logger.error(f"    Status: EXISTS but is not a directory")
+                except Exception as e:
+                    self.logger.error(f"    Status: EXISTS but cannot read contents: {e}")
+            else:
+                self.logger.error(f"    Status: DOES NOT EXIST")
     
     def discover_log_files(self, log_dir: Path) -> Dict[str, Path]:
         """
@@ -295,19 +723,19 @@ class HearthstoneLogMonitor:
             log_path = log_dir / log_file
             if log_path.exists():
                 log_files[log_type] = log_path
-                print(f"✅ Found {log_type}: {log_file}")
+                self.logger.info(f"✅ Found {log_type}: {log_file}")
             else:
-                print(f"⚠️ Missing {log_type}: {log_file}")
+                self.logger.warning(f"⚠️ Missing {log_type}: {log_file}")
         
         # Look for any additional .log files
         for log_path in log_dir.glob("*.log"):
             log_name = log_path.name.lower()
             if 'power' in log_name and 'power' not in log_files:
                 log_files['power'] = log_path
-                print(f"✅ Found power log: {log_path.name}")
+                self.logger.info(f"✅ Found power log: {log_path.name}")
             elif 'zone' in log_name and 'zone' not in log_files:
                 log_files['zone'] = log_path
-                print(f"✅ Found zone log: {log_path.name}")
+                self.logger.info(f"✅ Found zone log: {log_path.name}")
         
         return log_files
     
@@ -348,10 +776,10 @@ class HearthstoneLogMonitor:
             return []
             
         except (OSError, PermissionError) as e:
-            print(f"❌ Access error reading {log_type} ({log_path}): {e}")
+            self.logger.error(f"❌ Access error reading {log_type} ({log_path}): {e}")
             return []
         except Exception as e:
-            print(f"❌ Error reading {log_type}: {e}")
+            self.logger.error(f"❌ Error reading {log_type}: {e}")
             return []
     
     def parse_arena_log_line(self, line: str) -> Optional[LogEntry]:
@@ -384,7 +812,7 @@ class HearthstoneLogMonitor:
             return None
             
         except Exception as e:
-            print(f"❌ Error parsing arena log line: {e}")
+            self.logger.error(f"❌ Error parsing arena log line: {e}")
             return None
     
     def process_arena_events(self, lines: List[str]):
@@ -412,7 +840,7 @@ class HearthstoneLogMonitor:
                 
                 self.current_draft_picks.append(pick)
                 
-                print(f"🎯 DRAFT PICK: Slot {slot} -> {card_code} {'✨' if is_premium else ''}")
+                self.logger.info(f"🎯 DRAFT PICK: Slot {slot} -> {card_code} {'✨' if is_premium else ''}")
                 
                 if self.on_draft_pick:
                     self.on_draft_pick(pick)
@@ -428,7 +856,7 @@ class HearthstoneLogMonitor:
             if hero_match:
                 hero_code = hero_match.group(1)
                 self.current_hero = hero_code
-                print(f"👑 HERO SELECTED: {hero_code}")
+                self.logger.info(f"👑 HERO SELECTED: {hero_code}")
             
             # Draft start detection (Enhanced for AI Helper integration)
             if self.patterns['draft_choices'].search(message):
@@ -442,14 +870,14 @@ class HearthstoneLogMonitor:
                 # NEW: Also check for detailed draft choices pattern
                 detailed_match = self.patterns['draft_choices_detailed'].search(message)
                 if detailed_match:
-                    print("🎯 DETAILED DRAFT CHOICES DETECTED - AI Helper integration ready")
+                    self.logger.info("🎯 DETAILED DRAFT CHOICES DETECTED - AI Helper integration ready")
                     # This enhanced pattern detection can be used by AI Helper for more accurate timing
             
             # Current deck contents (for mid-draft analysis)
             deck_card_match = self.patterns['draft_deck_card'].search(message)
             if deck_card_match:
                 card_code = deck_card_match.group(1)
-                print(f"📋 Current deck contains: {card_code}")
+                self.logger.info(f"📋 Current deck contains: {card_code}")
     
     def process_loading_screen_events(self, lines: List[str]):
         """Process LoadingScreen.log events for precise screen detection."""
@@ -488,13 +916,13 @@ class HearthstoneLogMonitor:
             self._display_prominent_screen_change(new_state)
             self._set_game_state(new_state)
         elif action == "LOADING":
-            print(f"🔄 Transitioning to: {new_state.value}...")
+            self.logger.info(f"🔄 Transitioning to: {new_state.value}...")
     
     def _display_prominent_screen_change(self, new_state: GameState):
         """Display very prominent screen change notification."""
         # Create a prominent visual separator
-        print("\n" + "█" * 80)
-        print("█" + " " * 78 + "█")
+        self.logger.info("\n" + "#" * 80)
+        self.logger.info("#" + " " * 78 + "#")
         
         # Map states to emojis and colors
         state_display = {
@@ -517,10 +945,10 @@ class HearthstoneLogMonitor:
         # Center the text
         message = f"{emoji} CURRENT SCREEN: {display_name} {emoji}"
         padding = (78 - len(message)) // 2
-        print("█" + " " * padding + message + " " * (78 - padding - len(message)) + "█")
+        self.logger.info("#" + " " * padding + message + " " * (78 - padding - len(message)) + "#")
         
-        print("█" + " " * 78 + "█")
-        print("█" * 80)
+        self.logger.info("#" + " " * 78 + "#")
+        self.logger.info("#" * 80)
         
         # Add context-specific information
         if new_state == GameState.HUB:
@@ -532,17 +960,20 @@ class HearthstoneLogMonitor:
         elif new_state == GameState.COLLECTION:
             print("📚 Collection browsing - Arena Bot waiting")
         
-        print()
+        self.logger.info("")
     
     def _display_draft_start(self):
-        """Display prominent draft start notification."""
-        print("\n" + "🎯" * 40)
-        print("🎯" + " " * 76 + "🎯")
-        print("🎯" + " " * 25 + "ARENA DRAFT STARTED!" + " " * 25 + "🎯")
-        print("🎯" + " " * 20 + "Monitoring for card picks..." + " " * 20 + "🎯")
-        print("🎯" + " " * 76 + "🎯")
-        print("🎯" * 40)
-        print()
+        """Display prominent draft start notification with platform-safe characters."""
+        # Use platform-safe characters
+        icon = "*"  # Always use ASCII for maximum compatibility
+        
+        self.logger.info("\n" + icon * 40)
+        self.logger.info(icon + " " * 76 + icon)
+        self.logger.info(icon + " " * 25 + "ARENA DRAFT STARTED!" + " " * 25 + icon)
+        self.logger.info(icon + " " * 20 + "Monitoring for card picks..." + " " * 20 + icon)
+        self.logger.info(icon + " " * 76 + icon)
+        self.logger.info(icon * 40)
+        self.logger.info("")
     
     def _set_game_state(self, new_state: GameState):
         """Update game state and notify listeners."""
@@ -550,7 +981,7 @@ class HearthstoneLogMonitor:
             old_state = self.current_game_state
             self.current_game_state = new_state
             
-            print(f"🎮 Game state changed: {old_state.value} -> {new_state.value}")
+            self.logger.info(f"🎮 Game state changed: {old_state.value} -> {new_state.value}")
             
             if self.on_game_state_change:
                 self.on_game_state_change(old_state, new_state)
@@ -560,13 +991,13 @@ class HearthstoneLogMonitor:
         Main monitoring loop - Arena Tracker style with AI Helper enhancements.
         Enhanced with heartbeat monitoring, event deduplication, and error recovery.
         """
-        print("🚀 Starting enhanced log monitoring loop with AI Helper integration...")
+        self.logger.info("🚀 Starting enhanced log monitoring loop with AI Helper integration...")
         
         while self.monitoring:
             try:
                 # NEW: Check heartbeat and log accessibility
                 if not self._check_heartbeat_and_log_accessibility():
-                    print("⚠️ Log files not accessible, attempting recovery...")
+                    self.logger.warning("⚠️ Log files not accessible, attempting recovery...")
                     time.sleep(5)
                     continue
                 
@@ -577,12 +1008,12 @@ class HearthstoneLogMonitor:
                         self.log_files = self.discover_log_files(self.current_log_dir)
                         self.log_positions = {}  # Reset positions for new directory
                     else:
-                        print("⚠️ Cannot find log directory, retrying in 10 seconds...")
+                        self.logger.warning("⚠️ Cannot find log directory, retrying in 10 seconds...")
                         time.sleep(10)
                         continue
                 
                 if not self.log_files:
-                    print("⚠️ No log files found, retrying in 5 seconds...")
+                    self.logger.warning("⚠️ No log files found, retrying in 5 seconds...")
                     time.sleep(5)
                     continue
                 
@@ -600,7 +1031,7 @@ class HearthstoneLogMonitor:
                                     filtered_lines.append(line)
                             
                             if filtered_lines:
-                                print(f"📖 Processing {len(filtered_lines)} new lines from {log_type} (filtered {len(new_lines) - len(filtered_lines)} duplicates)")
+                                self.logger.info(f"📖 Processing {len(filtered_lines)} new lines from {log_type} (filtered {len(new_lines) - len(filtered_lines)} duplicates)")
                                 
                                 if log_type == 'arena':
                                     self.process_arena_events(filtered_lines)
@@ -609,7 +1040,7 @@ class HearthstoneLogMonitor:
                                 # Add more log processors as needed
                             
                     except Exception as log_error:
-                        print(f"⚠️ Error processing {log_type} log: {log_error}")
+                        self.logger.warning(f"⚠️ Error processing {log_type} log: {log_error}")
                         # Continue with other log files instead of crashing
                         continue
                 
@@ -618,7 +1049,7 @@ class HearthstoneLogMonitor:
                 time.sleep(sleep_time)
                 
             except Exception as e:
-                print(f"❌ Monitoring error: {e}")
+                self.logger.error(f"❌ Monitoring error: {e}")
                 # Attempt error recovery
                 self._attempt_log_error_recovery()
                 time.sleep(5)  # Wait before retrying
@@ -626,18 +1057,18 @@ class HearthstoneLogMonitor:
     def start_monitoring(self):
         """Start the log monitoring system."""
         if self.monitoring:
-            print("⚠️ Already monitoring")
+            self.logger.warning("⚠️ Already monitoring")
             return
         
         self.monitoring = True
         self.monitor_thread = threading.Thread(target=self.monitoring_loop, daemon=True)
         self.monitor_thread.start()
-        print("✅ Log monitoring started")
+        self.logger.info("✅ Log monitoring started")
     
     def stop_monitoring(self):
         """Stop the log monitoring system."""
         self.monitoring = False
-        print("⏸️ Log monitoring stopped")
+        self.logger.info("⏸️ Log monitoring stopped")
     
     def get_current_state(self) -> Dict:
         """Get current game state information."""
