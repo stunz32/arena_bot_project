@@ -1,0 +1,257 @@
+# S-Tier Logging System Configuration for Arena Bot
+# High-performance logging with <50μs latency and rich contextual data
+# Based on enterprise-grade observability patterns
+
+[system]
+version = "2.0.0"
+environment = "production"  # Options: development, staging, production
+system_name = "arena-bot-gui"
+instance_id = "auto"  # Auto-generated UUID or manual override
+
+[performance]
+# Async processing for non-blocking operations
+enable_async_processing = true
+async_queue_size = 5000  # High capacity for real-time game events
+worker_threads = 3  # Optimal for Arena Bot workload
+buffer_size = 1024
+batch_size = 50
+flush_interval_seconds = 1.0
+
+# Performance monitoring
+enable_performance_monitoring = true
+performance_sampling_rate = 0.1  # 10% sampling to minimize overhead
+
+[structured_logging]
+# Rich contextual logging for game events and AI decisions
+enable_structured_logging = true
+enable_context_enrichment = true
+correlation_id_enabled = true
+timestamp_precision = "microseconds"
+
+[diagnostics]
+# Health monitoring and emergency protocols
+enable_health_checks = true
+health_check_interval_seconds = 30
+enable_metrics = true
+enable_emergency_protocols = true
+emergency_threshold_error_rate = 0.05  # 5% error rate triggers emergency mode
+
+[security]
+# Arena Bot specific security settings
+enable_pii_detection = false  # Arena Bot doesn't handle PII
+redact_credentials = true
+enable_audit_trail = false  # Not required for gaming application
+compliance_mode = "none"  # Options: none, gdpr, hipaa, pci_dss
+
+[security.encryption]
+enabled = false  # Not required for Arena Bot logs
+algorithm = "AES-256-CBC"
+
+# Logger Configurations
+[loggers.arena_bot]
+name = "arena_bot"
+level = "INFO"
+handlers = ["console", "file"]
+sinks = ["console_sink", "file_sink", "performance_sink"]
+filters = ["level_filter", "rate_limiter"]
+propagate = false
+
+[loggers.arena_bot_gui]
+name = "arena_bot.gui"
+level = "INFO"
+handlers = ["console", "file"]
+sinks = ["console_sink", "file_sink"]
+filters = ["level_filter"]
+propagate = false
+
+[loggers.arena_bot_detection]
+name = "arena_bot.detection"
+level = "DEBUG"  # Detailed logging for card detection
+handlers = ["console", "file", "performance"]
+sinks = ["console_sink", "file_sink", "performance_sink"]
+filters = ["level_filter", "rate_limiter"]
+propagate = false
+
+[loggers.arena_bot_ai]
+name = "arena_bot.ai"
+level = "INFO"
+handlers = ["console", "file", "performance"]
+sinks = ["console_sink", "file_sink", "performance_sink"]
+filters = ["level_filter"]
+propagate = false
+
+[loggers.async_tkinter_bridge]
+name = "async_tkinter_bridge"
+level = "INFO"
+handlers = ["console", "file"]
+sinks = ["console_sink", "file_sink"]
+filters = ["level_filter"]
+propagate = false
+
+# Handler Configurations
+[handlers.console]
+name = "console"
+type = "console"
+level = "INFO"
+formatter = "console_formatter"
+
+[handlers.file]
+name = "file"
+type = "rotating_file"
+level = "DEBUG"
+formatter = "structured_formatter"
+filename = "logs/arena_bot.log"
+max_bytes = 10485760  # 10MB
+backup_count = 5
+
+[handlers.performance]
+name = "performance"
+type = "file"
+level = "DEBUG"
+formatter = "performance_formatter"
+filename = "logs/arena_bot_performance.log"
+max_bytes = 52428800  # 50MB
+backup_count = 3
+
+# Sink Configurations
+[sinks.console_sink]
+name = "console_sink"
+type = "console"
+level = "INFO"
+enabled = true
+formatter = "console_formatter"
+filters = []
+
+[sinks.file_sink]
+name = "file_sink"
+type = "tiered_file"
+level = "DEBUG"
+enabled = true
+formatter = "structured_formatter"
+filters = []
+base_path = "logs"
+file_pattern = "arena_bot_{level}_{date}.log"
+compression = "gzip"
+retention_days = 30
+
+[sinks.performance_sink]
+name = "performance_sink"
+type = "metrics"
+level = "DEBUG"
+enabled = true
+formatter = "performance_formatter"
+filters = ["performance_filter"]
+output_format = "json"
+aggregation_window_seconds = 60
+
+# Filter Configurations
+[filters.level_filter]
+name = "level_filter"
+type = "level"
+enabled = true
+priority = 100
+min_level = "DEBUG"
+max_level = "CRITICAL"
+
+[filters.rate_limiter]
+name = "rate_limiter"
+type = "rate_limiter"
+enabled = true
+priority = 200
+max_messages_per_second = 100
+burst_limit = 500
+window_seconds = 60
+
+[filters.performance_filter]
+name = "performance_filter"
+type = "correlation"
+enabled = true
+priority = 150
+include_patterns = ["performance.*", "detection.*", "ai.*"]
+exclude_patterns = ["debug.*", "trace.*"]
+
+# Formatter Configurations
+[formatters.console_formatter]
+name = "console_formatter"
+type = "console"
+format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+date_format = "%H:%M:%S"
+use_colors = true
+
+[formatters.structured_formatter]
+name = "structured_formatter"
+type = "structured"
+format = "json"
+include_context = true
+include_performance = true
+include_system = true
+
+[formatters.performance_formatter]
+name = "performance_formatter"
+type = "structured"
+format = "json"
+include_context = true
+include_performance = true
+include_system = false
+include_operation = true
+
+# Development Environment Overrides
+[environments.development]
+system.environment = "development"
+loggers.arena_bot.level = "DEBUG"
+loggers.arena_bot_detection.level = "DEBUG"
+loggers.arena_bot_ai.level = "DEBUG"
+loggers.async_tkinter_bridge.level = "DEBUG"
+handlers.console.level = "DEBUG"
+sinks.console_sink.level = "DEBUG"
+performance.performance_sampling_rate = 1.0  # 100% sampling in development
+
+# Production Environment Overrides
+[environments.production]
+system.environment = "production"
+loggers.arena_bot.level = "INFO"
+loggers.arena_bot_detection.level = "INFO"
+loggers.arena_bot_ai.level = "INFO"
+loggers.async_tkinter_bridge.level = "WARNING"
+handlers.console.level = "INFO"
+sinks.console_sink.level = "INFO"
+performance.performance_sampling_rate = 0.01  # 1% sampling in production
+diagnostics.enable_emergency_protocols = true
+
+# Arena Bot Specific Context Fields
+[context_enrichment]
+# Automatically include these fields in log context when available
+auto_include = [
+    "session_id",
+    "user_id", 
+    "game_mode",
+    "screen_resolution",
+    "detection_method",
+    "card_position",
+    "confidence_score",
+    "processing_time_ms",
+    "memory_usage_mb",
+    "cpu_usage_percent"
+]
+
+# Custom field mappings for Arena Bot domain
+[context_enrichment.field_mappings]
+"card_detection.confidence" = "confidence_score"
+"card_detection.method" = "detection_method"
+"card_detection.position" = "card_position"
+"performance.duration_ms" = "processing_time_ms"
+"system.memory_mb" = "memory_usage_mb"
+"system.cpu_percent" = "cpu_usage_percent"
+
+# Performance Thresholds for Alerting
+[performance_thresholds]
+# Arena Bot specific performance targets
+card_detection_latency_ms = 100  # Card detection should complete in <100ms
+ai_recommendation_latency_ms = 500  # AI recommendation should complete in <500ms
+gui_frame_time_ms = 16  # GUI should maintain 60fps (16ms per frame)
+memory_usage_mb = 512  # Keep memory usage under 512MB
+cpu_usage_percent = 25  # Keep CPU usage under 25%
+
+# Error rate thresholds
+error_rate_threshold = 0.02  # 2% error rate triggers alerts
+critical_error_threshold = 0.005  # 0.5% critical error rate triggers emergency protocols

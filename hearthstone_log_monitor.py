@@ -9,6 +9,7 @@ import os
 import sys
 import time
 import re
+import json  # For reading bot_config.json
 import hashlib  # NEW: For event deduplication signatures
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -23,6 +24,7 @@ except ImportError:
     winreg = None  # Not available on non-Windows platforms
     
 from logging_config import setup_logging, get_platform_info
+from logging_compatibility import get_logger  # S-Tier logging integration
 
 class GameState(Enum):
     """Game state detection from logs."""
@@ -64,8 +66,11 @@ class HearthstoneLogMonitor:
     
     def __init__(self, logs_base_path: Optional[str] = None):
         """Initialize the log monitor with intelligent path detection."""
-        # Set up logging first
-        self.logger = setup_logging(console_output=True)
+        # Set up S-Tier logging for enhanced diagnostics
+        self.logger = get_logger("hearthstone_log_monitor")
+        
+        # Also maintain backwards compatibility with old logging
+        fallback_logger = setup_logging(console_output=True)
         
         # Intelligent path resolution
         self.logs_base_path = self._resolve_hearthstone_logs_path(logs_base_path)
@@ -200,8 +205,26 @@ class HearthstoneLogMonitor:
                         self.log_file_accessible = False
                         self.logger.error("💔 No log files discovered for accessibility testing")
                 else:
-                    self.log_file_accessible = False
-                    self.logger.error(f"💔 Log directory inaccessible: {self.current_log_dir}")
+                    # SAFE MODE FIX: Handle case where Hearthstone isn't running 
+                    if self.current_log_dir is None:
+                        # Try to find a new log directory
+                        self.current_log_dir = self.find_latest_log_directory()
+                        
+                        if self.current_log_dir:
+                            # Found a new session - re-discover log files
+                            self.logger.info(f"✅ Found new Hearthstone session: {self.current_log_dir.name}")
+                            self.log_files = self.discover_log_files(self.current_log_dir)
+                            self.log_positions = {}  # Reset positions for new session
+                            # Don't set log_file_accessible=False, let the next heartbeat check it properly
+                            return True
+                        else:
+                            # No active session - this is normal when Hearthstone isn't running
+                            self.log_file_accessible = False
+                            self.logger.info(f"ℹ️ No active Hearthstone session (waiting for Hearthstone to start)")
+                    else:
+                        # Directory exists but isn't accessible
+                        self.log_file_accessible = False
+                        self.logger.error(f"💔 Log directory inaccessible: {self.current_log_dir}")
                     
             except Exception as e:
                 self.logger.warning(f"⚠️ Heartbeat check failed: {e}")
@@ -368,7 +391,7 @@ class HearthstoneLogMonitor:
     
     def _resolve_hearthstone_logs_path(self, custom_path: Optional[str] = None) -> Path:
         """
-        Intelligently resolve Hearthstone logs path across platforms.
+        Intelligently resolve Hearthstone logs path with user config priority.
         
         Args:
             custom_path: User-specified path (optional)
@@ -376,14 +399,76 @@ class HearthstoneLogMonitor:
         Returns:
             Path: Resolved logs base path
         """
-        if custom_path:
-            return Path(custom_path)
+        # --- NEW ROBUST PATH RESOLUTION LOGIC ---
         
-        # Platform-specific path resolution strategies
+        self.logger.info("🔍 Resolving Hearthstone logs path with priority system...")
+
+        # Create a list of candidate paths to check in order of priority.
+        path_candidates = []
+
+        # Priority 1: Custom path passed directly to the class constructor.
+        if custom_path:
+            path_candidates.append(Path(custom_path))
+            self.logger.info(f"   Priority 1: Checking custom path: {custom_path}")
+
+        # Priority 2: Path from the user's bot_config.json file.
+        try:
+            config_file = Path(__file__).parent / "bot_config.json"
+            if config_file.exists():
+                with open(config_file, 'r') as f:
+                    config = json.load(f)
+                user_path_str = config.get("hearthstone_log_path")
+                if user_path_str:
+                    path_candidates.append(Path(user_path_str))
+                    self.logger.info(f"   Priority 2: Checking path from config file: {user_path_str}")
+        except Exception as e:
+            self.logger.warning(f"   ⚠️ Could not read bot_config.json: {e}")
+
+        # Priority 3: Platform-specific auto-detection paths.
+        self.logger.info("   Priority 3: Checking platform-specific paths...")
         if sys.platform.startswith('win'):
-            return self._resolve_windows_logs_path()
+            # Windows-specific paths
+            if winreg:
+                try:
+                    # Registry path
+                    hkey, subkey = (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Blizzard Entertainment\Hearthstone")
+                    with winreg.OpenKey(hkey, subkey) as key:
+                        install_path, _ = winreg.QueryValueEx(key, "InstallPath")
+                        path_candidates.append(Path(install_path) / "Logs")
+                        self.logger.info(f"      -> Found registry path: {install_path}")
+                except Exception:
+                    pass # Ignore if not found
+            # Common Windows paths
+            path_candidates.append(Path("C:/Program Files (x86)/Hearthstone/Logs"))
+            path_candidates.append(Path(os.path.expanduser("~/AppData/Local/Blizzard/Hearthstone/Logs")))
         else:
-            return self._resolve_linux_wsl_logs_path()
+            # WSL/Linux paths
+            path_candidates.append(Path("/mnt/m/Hearthstone/Logs"))
+            path_candidates.append(Path("/mnt/c/Program Files (x86)/Hearthstone/Logs"))
+            path_candidates.append(Path("/mnt/d/Hearthstone/Logs"))
+
+
+        # Now, iterate through the candidates and return the FIRST valid one.
+        for i, candidate_path in enumerate(path_candidates):
+            self.logger.info(f"   Checking candidate #{i+1}: '{candidate_path}'")
+            try:
+                if candidate_path.exists() and candidate_path.is_dir():
+                    # Check for at least one valid session subfolder
+                    if any(item.is_dir() and item.name.startswith("Hearthstone_") for item in candidate_path.iterdir()):
+                        self.logger.info(f"   ✅ SUCCESS: Found valid Hearthstone logs at '{candidate_path}'")
+                        return candidate_path
+                    else:
+                        self.logger.warning(f"   ⚠️ Path exists but contains no valid session folders: '{candidate_path}'")
+                else:
+                    self.logger.info(f"   - Path does not exist or is not a directory.")
+            except Exception as e:
+                self.logger.warning(f"   - Error checking path '{candidate_path}': {e}")
+        
+        # If no valid path was found after all checks
+        self.logger.error("❌ CRITICAL: Could not find a valid Hearthstone logs directory after checking all known locations.")
+        self.logger.error("   Please ensure the path in 'bot_config.json' is correct and accessible.")
+        # Return a non-None but non-existent path to prevent crashes, but it will fail gracefully.
+        return Path("./hearthstone_logs_not_found")
     
     def _resolve_windows_logs_path(self) -> Path:
         """
@@ -588,12 +673,41 @@ class HearthstoneLogMonitor:
                 else:
                     self.logger.debug(f"    ⚠️ No timestamped directories found")
                     
+                    # SAFE MODE FIX: Try to list what's actually in the directory
+                    try:
+                        all_items = list(candidate_path.iterdir())
+                        dirs = [item for item in all_items if item.is_dir()]
+                        self.logger.debug(f"    📁 Directory contains {len(all_items)} items, {len(dirs)} directories")
+                        
+                        # Show a few directory names for debugging
+                        if dirs:
+                            sample_dirs = [d.name for d in dirs[:5]]
+                            self.logger.debug(f"    📋 Sample directories: {sample_dirs}")
+                            
+                            # FALLBACK: If no timestamped dirs but we have directories, 
+                            # maybe Hearthstone isn't running - that's OK, we can monitor for when it starts
+                            self.logger.info(f"ℹ️ Hearthstone may not be running currently (no active session directories)")
+                            self.logger.info(f"   The bot can still monitor and will detect when Hearthstone starts")
+                            
+                            # Update base path so we can monitor for new directories
+                            self.logs_base_path = candidate_path
+                            
+                    except Exception as debug_e:
+                        self.logger.debug(f"    ❌ Cannot list directory contents: {debug_e}")
+                    
             except (OSError, PermissionError) as e:
                 self.logger.debug(f"    ❌ Access error: {e}")
                 continue
             except Exception as e:
                 self.logger.warning(f"    ❌ Unexpected error: {e}")
                 continue
+        
+        # SAFE MODE FIX: Instead of complete failure, return a monitoring-ready state
+        if hasattr(self, 'logs_base_path') and self.logs_base_path and self.logs_base_path.exists():
+            self.logger.warning("⚠️ No active Hearthstone session found, but base path is valid")
+            self.logger.info("🔄 Bot will monitor for when Hearthstone starts a new session")
+            # Return None but don't treat this as a complete failure
+            return None
         
         # All candidates failed
         self.logger.error("❌ No valid Hearthstone log directories found in any candidate path")
@@ -1026,7 +1140,8 @@ class HearthstoneLogMonitor:
                             # Filter out duplicate events
                             filtered_lines = []
                             for line in new_lines:
-                                event_signature = self._generate_event_signature(line.message, log_type)
+                                # Fix: line is a string, not an object with .message attribute
+                                event_signature = self._generate_event_signature(line, log_type)
                                 if not self._is_duplicate_event(event_signature):
                                     filtered_lines.append(line)
                             
@@ -1040,7 +1155,15 @@ class HearthstoneLogMonitor:
                                 # Add more log processors as needed
                             
                     except Exception as log_error:
-                        self.logger.warning(f"⚠️ Error processing {log_type} log: {log_error}")
+                        # Enhanced S-Tier error logging with context
+                        self.logger.warning(f"⚠️ Error processing {log_type} log: {log_error}", extra={
+                            'log_type': log_type,
+                            'log_path': str(log_path),
+                            'error_type': type(log_error).__name__,
+                            'error_message': str(log_error),
+                            'log_file_exists': log_path.exists() if log_path else False,
+                            'log_file_size': log_path.stat().st_size if log_path and log_path.exists() else 0
+                        }, exc_info=True)
                         # Continue with other log files instead of crashing
                         continue
                 

@@ -44,18 +44,18 @@ class LogMessage:
     This is the primary data structure that flows through the queue system.
     Optimized for performance with minimal allocations and fast serialization.
     """
-    timestamp: float
     level: int
-    logger_name: str
     message: str
-    correlation_id: str
-    thread_id: str
-    process_id: int
+    logger_name: str
+    timestamp: float = None
+    correlation_id: str = None
+    thread_id: str = None
+    process_id: int = None
     
     # Context and performance data
-    context: Dict[str, Any]
-    performance: Dict[str, Any]
-    system: Dict[str, Any]
+    context: Dict[str, Any] = None
+    performance: Dict[str, Any] = None
+    system: Dict[str, Any] = None
     operation: Optional[Dict[str, Any]] = None
     error: Optional[Dict[str, Any]] = None
     
@@ -66,6 +66,26 @@ class LogMessage:
     created_at: float = 0.0
     
     def __post_init__(self):
+        import uuid
+        import threading
+        import os
+        
+        # Set default values if not provided
+        if self.timestamp is None:
+            self.timestamp = time.time()
+        if self.correlation_id is None:
+            self.correlation_id = str(uuid.uuid4())[:8]
+        if self.thread_id is None:
+            self.thread_id = threading.current_thread().name
+        if self.process_id is None:
+            self.process_id = os.getpid()
+        if self.context is None:
+            self.context = {}
+        if self.performance is None:
+            self.performance = {}
+        if self.system is None:
+            self.system = {}
+        
         if self.created_at == 0.0:
             self.created_at = time.time()
     

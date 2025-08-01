@@ -38,10 +38,16 @@ import sys
 from typing import Optional, Dict, Any, Callable
 
 # Import core components
-from .core.logger_manager import LoggerManager, STierLogger
-from .core.context_enricher import operation_context, timed_operation
-from .config.defaults import get_default_config
+from .logger import LoggerManager, STierLogger, LogLevel, LogRecord, get_logger, initialize_logging, shutdown_logging
+from .core.context_enricher import ContextEnricher
+from .config import ConfigurationFactory, create_development_config
 from .diagnostics.health_checker import health_check
+from .resource_monitor import (
+    UnifiedResourceMonitor,
+    ResourceMonitorConfig,
+    initialize_unified_monitoring,
+    get_unified_health_status
+)
 
 # Version information
 __version__ = "1.0.0"
@@ -53,12 +59,13 @@ _is_setup: bool = False
 
 
 def setup_s_tier_logging(
-    config: Optional[Dict[str, Any]] = None,
+    config_path: Optional[str] = None,
+    environment: str = "development",
     enable_performance_monitoring: bool = True,
     enable_structured_output: bool = True,
     enable_metrics_integration: bool = True,
     enable_correlation_tracking: bool = True,
-    log_level: int = logging.INFO,
+    log_level: str = "INFO",
     replace_standard_logging: bool = True
 ) -> LoggerManager:
     """
@@ -69,12 +76,13 @@ def setup_s_tier_logging(
     using logging.getLogger() will automatically use S-Tier features.
     
     Args:
-        config: Optional configuration dictionary. Uses defaults if None.
+        config_path: Optional path to configuration file. Uses defaults if None.
+        environment: Target environment (development, testing, staging, production)
         enable_performance_monitoring: Enable performance tracking and metrics
         enable_structured_output: Enable structured JSON output format  
         enable_metrics_integration: Enable integration with monitoring.py
         enable_correlation_tracking: Enable correlation ID tracking
-        log_level: Default logging level
+        log_level: Default logging level (TRACE, DEBUG, INFO, WARNING, ERROR, CRITICAL)
         replace_standard_logging: Replace standard logging with S-Tier
         
     Returns:
@@ -100,39 +108,69 @@ def setup_s_tier_logging(
         return _global_logger_manager
     
     try:
-        # Load configuration
-        if config is None:
-            config = get_default_config()
+        import asyncio
+        from pathlib import Path
         
-        # Update config with parameters
-        config.update({
-            'enable_performance_monitoring': enable_performance_monitoring,
-            'enable_structured_output': enable_structured_output,
-            'enable_metrics_integration': enable_metrics_integration,
-            'enable_correlation_tracking': enable_correlation_tracking,
-            'log_level': log_level,
-            'replace_standard_logging': replace_standard_logging
-        })
+        # Create configuration factory
+        config_factory = ConfigurationFactory()
+        
+        # Create configuration with overrides
+        overrides = {}
+        if environment != "development":
+            overrides["environment"] = environment
+        
+        # Load configuration
+        config_path_obj = Path(config_path) if config_path else None
+        config = config_factory.create_config(
+            config_path=config_path_obj,
+            environment=environment,
+            overrides=overrides
+        )
         
         # Create logger manager
         _global_logger_manager = LoggerManager(config)
         
-        # Initialize the system
-        _global_logger_manager.initialize()
+        # Initialize the system (handle async properly)
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # If we're in an async context, schedule initialization
+                asyncio.create_task(_global_logger_manager.initialize())
+            else:
+                # If not in async context, run initialization
+                asyncio.run(_global_logger_manager.initialize())
+        except RuntimeError:
+            # No event loop, create one
+            asyncio.run(_global_logger_manager.initialize())
         
-        # Replace standard logging if requested
-        if replace_standard_logging:
-            _global_logger_manager.replace_standard_logging()
+        # Initialize unified resource monitoring
+        resource_config = ResourceMonitorConfig(
+            enable_existing_monitoring=enable_metrics_integration,
+            enable_unified_health_reporting=True
+        )
+        unified_monitor = initialize_unified_monitoring(_global_logger_manager, resource_config)
+        
+        # Start unified monitoring
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(unified_monitor.start_monitoring())
+            else:
+                asyncio.run(unified_monitor.start_monitoring())
+        except RuntimeError:
+            asyncio.run(unified_monitor.start_monitoring())
         
         _is_setup = True
         
         # Log successful initialization
         logger = _global_logger_manager.get_logger(__name__)
         logger.info("S-Tier Logging System initialized successfully",
-                   version=__version__,
-                   config_keys=list(config.keys()),
-                   performance_monitoring=enable_performance_monitoring,
-                   structured_output=enable_structured_output)
+                   extra={
+                       'version': __version__,
+                       'environment': environment,
+                       'performance_monitoring': enable_performance_monitoring,
+                       'structured_output': enable_structured_output
+                   })
         
         return _global_logger_manager
         
@@ -174,10 +212,21 @@ def shutdown() -> None:
     
     if _global_logger_manager is not None:
         try:
+            import asyncio
+            
             logger = _global_logger_manager.get_logger(__name__)
             logger.info("S-Tier Logging System shutting down gracefully")
             
-            _global_logger_manager.shutdown()
+            # Handle async shutdown properly
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.create_task(_global_logger_manager.shutdown())
+                else:
+                    asyncio.run(_global_logger_manager.shutdown())
+            except RuntimeError:
+                asyncio.run(_global_logger_manager.shutdown())
+            
             _global_logger_manager = None
             _is_setup = False
             
@@ -199,11 +248,22 @@ def get_system_health() -> Dict[str, Any]:
             'version': __version__
         }
     
-    return health_check(_global_logger_manager)
+    # Get unified health status that includes both S-tier and existing monitoring
+    unified_health = get_unified_health_status()
+    
+    # Get detailed S-tier health check
+    s_tier_health = health_check(_global_logger_manager)
+    
+    # Combine health information
+    return {
+        'unified_status': unified_health,
+        's_tier_details': s_tier_health,
+        'version': __version__,
+        'initialized': True
+    }
 
 
-# Context manager for operation tracking
-# (imported from core.context_enricher)
+# Export the new S-tier logging API
 __all__ = [
     # Setup and management
     'setup_s_tier_logging',
@@ -212,10 +272,27 @@ __all__ = [
     'shutdown',
     'get_system_health',
     
-    # Enhanced logging API
+    # Core logging API
+    'LoggerManager',
     'STierLogger',
-    'operation_context',
-    'timed_operation',
+    'LogLevel',
+    'LogRecord',
+    'get_logger',
+    'initialize_logging',
+    'shutdown_logging',
+    
+    # Configuration
+    'ConfigurationFactory',
+    'create_development_config',
+    
+    # Context enrichment
+    'ContextEnricher',
+    
+    # Resource monitoring
+    'UnifiedResourceMonitor',
+    'ResourceMonitorConfig',
+    'initialize_unified_monitoring',
+    'get_unified_health_status',
     
     # Health and diagnostics
     'health_check',

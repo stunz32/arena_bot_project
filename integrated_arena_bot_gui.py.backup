@@ -31,14 +31,6 @@ from metrics_logger import MetricsLogger, log_detection_metrics, generate_perfor
 # Import CardRefiner for perfect coordinate refinement
 from arena_bot.core.card_refiner import CardRefiner
 
-# Import S-Tier logging integration components (backwards compatible)
-from logging_compatibility import (
-    get_logger, 
-    get_async_logger, 
-    setup_async_compatibility_logging,
-    get_compatibility_stats
-)
-
 class ManualCorrectionDialog(tk.Toplevel):
     """
     Dialog window for manual card correction with auto-complete search.
@@ -260,9 +252,6 @@ class IntegratedArenaBotGUI:
         print("   • Complete GUI interface")
         print("=" * 80)
         
-        # Initialize S-Tier logging system (with fallback to standard logging)
-        self._initialize_stier_logging()
-        
         # Initialize thread tracking system (Performance Fix 1)
         self._active_threads = {}  # Thread registry for cleanup tracking
         self._thread_lock = threading.Lock()  # Thread registry protection
@@ -333,7 +322,7 @@ class IntegratedArenaBotGUI:
         self.grandmaster_advisor = None
         self.archetype_preference = None
         self.event_queue = Queue(maxsize=50)  # Bounded main event queue for event-driven architecture
-        self.event_polling_active = False  # Initialize before init_ai_helper_system()
+        self.event_polling_active = False
         self.visual_overlay = None
         self.hover_detector = None
         
@@ -362,378 +351,7 @@ class IntegratedArenaBotGUI:
         # GUI setup
         self.setup_gui()
         
-        # BULLETPROOF: Validate critical methods at startup (after all initialization)
-        self._validate_critical_methods()
-        
         print("🎯 Integrated Arena Bot GUI ready!")
-    
-    def _initialize_stier_logging(self):
-        """
-        Initialize S-Tier logging system with fallback to standard logging.
-        
-        This method provides backwards-compatible logging initialization that:
-        - Attempts to initialize S-Tier logging for rich contextual observability
-        - Falls back gracefully to standard Python logging if S-Tier is unavailable
-        - Preserves all existing functionality while adding enterprise-grade logging
-        """
-        try:
-            print("🚀 Initializing S-Tier logging system...")
-            
-            # Initialize S-Tier compatible logger for this component
-            self.logger = get_logger(f"{__name__}.IntegratedArenaBotGUI")
-            
-            # Log successful initialization with rich context
-            self.logger.info("🎯 Arena Bot GUI S-Tier logging initialized", extra={
-                'component_initialization': {
-                    'component_name': 'IntegratedArenaBotGUI',
-                    'logging_mode': 's_tier_compatible',
-                    'fallback_enabled': True,
-                    'features_enabled': [
-                        'contextual_logging',
-                        'performance_tracking', 
-                        'error_enrichment',
-                        'thread_safe_logging'
-                    ]
-                }
-            })
-            
-            print("✅ S-Tier logging initialized successfully")
-            
-        except Exception as e:
-            # Fallback to standard print-based logging if everything fails
-            print(f"⚠️ S-Tier logging initialization failed, using standard logging: {e}")
-            # Create a basic fallback logger
-            import logging
-            self.logger = logging.getLogger(f"{__name__}.IntegratedArenaBotGUI")
-            self.logger.setLevel(logging.INFO)
-            if not self.logger.handlers:
-                handler = logging.StreamHandler()
-                handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
-                self.logger.addHandler(handler)
-    
-    def _validate_critical_methods(self):
-        """
-        BULLETPROOF: Validate all critical methods exist with EXHAUSTIVE diagnostics.
-        
-        This method uses multiple introspection techniques to identify exactly why
-        methods might appear missing during initialization, providing comprehensive
-        diagnostics to pinpoint timing and visibility issues.
-        """
-        print("🔍 DEBUG: Starting EXHAUSTIVE method validation diagnostics...")
-        print("=" * 80)
-        
-        # Import for advanced introspection
-        import inspect
-        import types
-        
-        required_methods = [
-            '_register_thread', '_unregister_thread', 'manual_screenshot',
-            'log_text', '_initialize_stier_logging'
-        ]
-        
-        print(f"🎯 TARGET METHODS: {required_methods}")
-        print("=" * 80)
-        
-        # === PHASE 1: COMPREHENSIVE METHOD DISCOVERY ===
-        print("📊 PHASE 1: COMPREHENSIVE METHOD DISCOVERY")
-        print("-" * 50)
-        
-        # Technique 1: dir() - Standard directory listing
-        dir_methods = set(dir(self))
-        print(f"🔍 dir(self): {len(dir_methods)} total attributes")
-        
-        # Technique 2: vars() - Instance dictionary
-        try:
-            vars_methods = set(vars(self).keys()) if vars(self) else set()
-            print(f"🔍 vars(self): {len(vars_methods)} instance attributes")
-        except Exception as e:
-            vars_methods = set()
-            print(f"🔍 vars(self): Failed - {e}")
-        
-        # Technique 3: __class__.__dict__ - Class dictionary
-        class_dict_methods = set(self.__class__.__dict__.keys())
-        print(f"🔍 __class__.__dict__: {len(class_dict_methods)} class attributes")
-        
-        # Technique 4: inspect.getmembers() - Full inspection
-        try:
-            inspect_members = set([name for name, _ in inspect.getmembers(self)])
-            print(f"🔍 inspect.getmembers(): {len(inspect_members)} total members")
-        except Exception as e:
-            inspect_members = set()
-            print(f"🔍 inspect.getmembers(): Failed - {e}")
-        
-        # Technique 5: MRO (Method Resolution Order) analysis
-        print(f"🔍 MRO: {[cls.__name__ for cls in self.__class__.__mro__]}")
-        
-        # === PHASE 2: DETAILED ANALYSIS FOR EACH TARGET METHOD ===
-        print("\n📊 PHASE 2: DETAILED METHOD ANALYSIS")
-        print("-" * 50)
-        
-        method_analysis = {}
-        
-        for method in required_methods:
-            print(f"\n🔍 ANALYZING: {method}")
-            print("  " + "-" * 40)
-            
-            analysis = {
-                'dir_check': method in dir_methods,
-                'vars_check': method in vars_methods,
-                'class_dict_check': method in class_dict_methods,
-                'inspect_check': method in inspect_members,
-                'hasattr_check': hasattr(self, method),
-                'getattr_success': False,
-                'getattr_value': None,
-                'getattr_type': None,
-                'callable_check': False,
-                'inspect_signature': None,
-                'inspect_source_location': None
-            }
-            
-            # Test getattr access
-            try:
-                attr_value = getattr(self, method, None)
-                analysis['getattr_success'] = True
-                analysis['getattr_value'] = str(attr_value)[:100] + "..." if len(str(attr_value)) > 100 else str(attr_value)
-                analysis['getattr_type'] = type(attr_value).__name__
-                analysis['callable_check'] = callable(attr_value)
-            except Exception as e:
-                analysis['getattr_error'] = str(e)
-            
-            # Test inspect signature
-            if analysis['getattr_success'] and analysis['callable_check']:
-                try:
-                    sig = inspect.signature(getattr(self, method))
-                    analysis['inspect_signature'] = str(sig)
-                except Exception as e:
-                    analysis['inspect_signature_error'] = str(e)
-            
-            # Try to find source location
-            try:
-                if hasattr(self.__class__, method):
-                    method_obj = getattr(self.__class__, method)
-                    if hasattr(method_obj, '__code__'):
-                        analysis['inspect_source_location'] = f"Line {method_obj.__code__.co_firstlineno}"
-                    else:
-                        analysis['inspect_source_location'] = "No __code__ attribute"
-                else:
-                    analysis['inspect_source_location'] = "Not in class"
-            except Exception as e:
-                analysis['inspect_source_location'] = f"Error: {e}"
-            
-            method_analysis[method] = analysis
-            
-            # Print detailed results
-            print(f"  📋 Discovery Results:")
-            print(f"     dir(): {analysis['dir_check']}")
-            print(f"     vars(): {analysis['vars_check']}")
-            print(f"     __class__.__dict__: {analysis['class_dict_check']}")
-            print(f"     inspect.getmembers(): {analysis['inspect_check']}")
-            print(f"     hasattr(): {analysis['hasattr_check']}")
-            print(f"  📋 Access Results:")
-            print(f"     getattr() success: {analysis['getattr_success']}")
-            if analysis['getattr_success']:
-                print(f"     getattr() type: {analysis['getattr_type']}")
-                print(f"     callable(): {analysis['callable_check']}")
-                if analysis.get('inspect_signature'):
-                    print(f"     signature: {analysis['inspect_signature']}")
-            print(f"  📋 Source Location: {analysis.get('inspect_source_location', 'Unknown')}")
-        
-        # === PHASE 3: COMPARATIVE ANALYSIS ===
-        print(f"\n📊 PHASE 3: COMPARATIVE ANALYSIS")
-        print("-" * 50)
-        
-        # Show which methods are found by which techniques
-        for technique, method_set in [
-            ("dir()", dir_methods),
-            ("vars()", vars_methods),
-            ("__class__.__dict__", class_dict_methods),
-            ("inspect.getmembers()", inspect_members)
-        ]:
-            found_required = [m for m in required_methods if m in method_set]
-            missing_required = [m for m in required_methods if m not in method_set]
-            print(f"🔍 {technique}:")
-            print(f"   ✅ Found: {found_required}")
-            print(f"   ❌ Missing: {missing_required}")
-        
-        # === PHASE 4: TIMING ANALYSIS ===
-        print(f"\n📊 PHASE 4: TIMING & AVAILABILITY SUMMARY")
-        print("-" * 50)
-        
-        available_methods = []
-        missing_methods = []
-        partially_available = []
-        
-        for method, analysis in method_analysis.items():
-            # Consider method available if it passes multiple checks
-            checks_passed = sum([
-                analysis['hasattr_check'],
-                analysis['getattr_success'],
-                analysis['callable_check'],
-                analysis['dir_check']
-            ])
-            
-            if checks_passed >= 3:  # At least 3 out of 4 checks pass
-                available_methods.append(method)
-                print(f"✅ {method}: AVAILABLE ({checks_passed}/4 checks passed)")
-            elif checks_passed > 0:
-                partially_available.append(method)
-                print(f"⚠️ {method}: PARTIAL ({checks_passed}/4 checks passed) - Timing issue likely")
-            else:
-                missing_methods.append(method)
-                print(f"❌ {method}: MISSING ({checks_passed}/4 checks passed)")
-        
-        # === PHASE 5: FALLBACK CREATION WITH ENHANCED LOGIC ===
-        print(f"\n📊 PHASE 5: FALLBACK CREATION")
-        print("-" * 50)
-        
-        methods_needing_fallbacks = missing_methods + partially_available
-        
-        if methods_needing_fallbacks:
-            print(f"🔧 Creating fallbacks for: {methods_needing_fallbacks}")
-            
-            for method in methods_needing_fallbacks:
-                if method == '_register_thread':
-                    self._create_fallback_thread_registration()
-                elif method == '_unregister_thread':
-                    self._create_fallback_thread_unregistration()
-                elif method == 'log_text':
-                    self._create_fallback_logging()
-                
-                # Verify fallback was created successfully
-                if hasattr(self, method) and callable(getattr(self, method)):
-                    print(f"✅ Fallback created successfully for {method}")
-                else:
-                    print(f"❌ Fallback creation failed for {method}")
-        else:
-            print("✅ No fallbacks needed - all methods properly available")
-        
-        # === PHASE 6: POST-FALLBACK VERIFICATION & COMPARISON ===
-        print(f"\n📊 PHASE 6: POST-FALLBACK VERIFICATION & COMPARISON")
-        print("-" * 50)
-        
-        for method in required_methods:
-            if hasattr(self, method) and callable(getattr(self, method)):
-                method_obj = getattr(self, method)
-                print(f"✅ {method}: Now available (type: {type(method_obj).__name__})")
-                
-                # Check if this is an original method or a fallback
-                is_fallback = False
-                method_source = "Unknown"
-                
-                try:
-                    # Check if method was created as a fallback (has specific signature)
-                    import inspect
-                    if hasattr(method_obj, '__name__'):
-                        if method_obj.__name__.startswith('fallback_'):
-                            is_fallback = True
-                            method_source = "Fallback method"
-                        else:
-                            method_source = "Original class method"
-                    
-                    # Try to get source information
-                    if hasattr(method_obj, '__code__'):
-                        line_num = method_obj.__code__.co_firstlineno
-                        method_source += f" (line {line_num})"
-                    else:
-                        method_source += " (no source info)"
-                        
-                except Exception:
-                    method_source = "Unable to determine source"
-                
-                print(f"   📍 Source: {method_source}")
-                
-                # For fallback methods, check if original also exists in class
-                if is_fallback and hasattr(self.__class__, method):
-                    original_method = getattr(self.__class__, method)
-                    if callable(original_method):
-                        print(f"   ⚠️ NOTE: Original method also exists in class but was not accessible during validation")
-                        try:
-                            if hasattr(original_method, '__code__'):
-                                orig_line = original_method.__code__.co_firstlineno  
-                                print(f"   📍 Original method location: line {orig_line}")
-                        except Exception:
-                            print(f"   📍 Original method location: unknown")
-                
-            else:
-                print(f"❌ {method}: Still not available after fallback creation")
-        
-        # === SUMMARY ===
-        final_available = len([m for m in required_methods if hasattr(self, m) and callable(getattr(self, m))])
-        print("\n" + "=" * 80)
-        print(f"🎯 EXHAUSTIVE VALIDATION COMPLETE: {final_available}/{len(required_methods)} methods available")
-        print(f"✅ Available: {available_methods}")
-        if partially_available:
-            print(f"⚠️ Timing Issues: {partially_available}")
-        if missing_methods:
-            print(f"❌ Missing: {missing_methods}")
-        print("=" * 80)
-        
-        # Also validate required attributes
-        self._validate_required_attributes()
-    
-    def _validate_required_attributes(self):
-        """Validate that all required attributes exist after initialization."""
-        print("\n📊 ATTRIBUTE VALIDATION")
-        print("-" * 50)
-        
-        required_attributes = ['_active_threads', '_thread_lock', 'result_queue', 'event_queue']
-        missing_attributes = []
-        
-        for attr in required_attributes:
-            if not hasattr(self, attr):
-                missing_attributes.append(attr)
-                print(f"❌ Attribute missing: {attr}")
-            else:
-                attr_value = getattr(self, attr)
-                print(f"✅ Attribute available: {attr} (type: {type(attr_value).__name__})")
-        
-        if missing_attributes:
-            print(f"🚨 Missing attributes: {missing_attributes}")
-            print("🔧 These should be created during initialization - this may indicate a timing issue")
-        else:
-            print("✅ All required attributes found - initialization completed successfully")
-    
-    def _create_fallback_thread_registration(self):
-        """Create a bulletproof fallback for thread registration."""
-        def fallback_register_thread(thread):
-            print(f"🔄 FALLBACK: Registering thread {thread.name} using emergency method")
-            if not hasattr(self, '_active_threads'):
-                self._active_threads = {}
-            if not hasattr(self, '_thread_lock'):
-                self._thread_lock = threading.Lock()
-            
-            with self._thread_lock:
-                thread_id = thread.ident if hasattr(thread, 'ident') else id(thread)
-                self._active_threads[thread_id] = {
-                    'thread': thread,
-                    'name': thread.name if hasattr(thread, 'name') else 'Fallback Thread',
-                    'created_at': time.time()
-                }
-            print(f"✅ Thread registered using fallback method")
-        
-        self._register_thread = fallback_register_thread
-        print("✅ Created fallback _register_thread method")
-    
-    def _create_fallback_thread_unregistration(self):
-        """Create a bulletproof fallback for thread unregistration."""
-        def fallback_unregister_thread(thread_id):
-            print(f"🔄 FALLBACK: Unregistering thread {thread_id} using emergency method")
-            if hasattr(self, '_active_threads') and hasattr(self, '_thread_lock'):
-                with self._thread_lock:
-                    if thread_id in self._active_threads:
-                        del self._active_threads[thread_id]
-                        print(f"✅ Thread unregistered using fallback method")
-        
-        self._unregister_thread = fallback_unregister_thread
-        print("✅ Created fallback _unregister_thread method")
-    
-    def _create_fallback_logging(self):
-        """Create a bulletproof fallback for logging."""
-        def fallback_log_text(message):
-            print(f"[FALLBACK LOG] {message}")
-        
-        self.log_text = fallback_log_text
-        print("✅ Created fallback log_text method")
     
     def _run_detection_with_timeout(self, detection_func, timeout_seconds: float, method_name: str):
         """
@@ -1926,33 +1544,15 @@ class IntegratedArenaBotGUI:
         - Visual Intelligence components setup
         - Event-driven architecture setup
         - Component lifecycle management
-        - Windows compatibility fixes
         """
         print("🧠 Initializing AI Helper system...")
         
         try:
-            # Windows compatibility check
-            import sys
-            import platform
-            
-            if sys.platform == 'win32':
-                # Check for Windows-specific compatibility issues
-                try:
-                    # Test import that might fail on Windows
-                    import resource
-                except ImportError:
-                    # Resource module not available on Windows - create a mock
-                    import types
-                    resource = types.ModuleType('resource')
-                    resource.getrusage = lambda x: None
-                    resource.RUSAGE_SELF = 0
-                    sys.modules['resource'] = resource
-            
-            # Import AI Helper components with Windows fallback handling
+            # Import AI Helper components with fallback
             from arena_bot.ai_v2.grandmaster_advisor import GrandmasterAdvisor
             from arena_bot.ai_v2.data_models import ArchetypePreference
             
-            # Initialize Grandmaster Advisor with Windows compatibility
+            # Initialize Grandmaster Advisor
             self.grandmaster_advisor = GrandmasterAdvisor(enable_caching=True, enable_ml=True)
             self.archetype_preference = ArchetypePreference.BALANCED  # Default preference
             
@@ -1966,29 +1566,10 @@ class IntegratedArenaBotGUI:
                 print(f"⚠️ Visual Intelligence not available: {visual_error}")
                 print("   AI Helper will work without visual overlay")
             
-            # Start event-driven architecture with safer initialization
-            try:
-                self._start_event_polling()
-                print("✅ AI Helper system fully operational with event-driven architecture")
-            except AttributeError as attr_error:
-                if 'event_polling_active' in str(attr_error):
-                    # Initialize missing attribute and retry
-                    self.event_polling_active = False
-                    self._start_event_polling()
-                    print("✅ AI Helper system operational (fixed missing attribute)")
-                else:
-                    raise
+            # Start event-driven architecture
+            self._start_event_polling()
             
-        except (ImportError, ModuleNotFoundError) as import_error:
-            if 'resource' in str(import_error):
-                print(f"⚠️ AI Helper system not available: Windows compatibility issue - {import_error}")
-                print("   The 'resource' module is Unix-specific and not available on Windows")
-                print("   System will fall back to legacy AI advisor")
-            else:
-                print(f"⚠️ AI Helper system not available: Missing module - {import_error}")
-                print("   System will fall back to legacy AI advisor")
-            self.grandmaster_advisor = None
-            self.archetype_preference = None
+            print("✅ AI Helper system fully operational with event-driven architecture")
             
         except Exception as e:
             print(f"⚠️ AI Helper system not available: {e}")
@@ -1998,76 +1579,25 @@ class IntegratedArenaBotGUI:
     
     def init_visual_intelligence(self):
         """
-        Initialize visual intelligence components with bulletproof diagnostics.
-        
-        This method provides comprehensive diagnostics and multiple fallback strategies.
+        Initialize visual intelligence components (Phase 3 integration).
+        This method will be enhanced when Phase 3 components are available.
         """
-        import os
-        import sys
-        
-        self.log_text("🔍 DEBUG: Starting visual intelligence initialization")
-        self.log_text(f"🔍 DEBUG: Current working directory: {os.getcwd()}")
-        self.log_text(f"🔍 DEBUG: Python path includes: {sys.path[:3]}")
-        
-        # Test each import individually with detailed diagnostics
-        visual_overlay = None
-        hover_detector = None
-        
-        # Test 1: Import VisualIntelligenceOverlay
         try:
-            self.log_text("🔍 DEBUG: Attempting to import VisualIntelligenceOverlay...")
-            from arena_bot.ui.visual_overlay import VisualIntelligenceOverlay
-            self.log_text("✅ VisualIntelligenceOverlay import successful")
+            # Import visual components (will be available after Phase 3)
+            # from arena_bot.ui.visual_overlay import VisualIntelligenceOverlay
+            # from arena_bot.ui.hover_detector import HoverDetector
             
-            self.log_text("🔍 DEBUG: Attempting to initialize VisualIntelligenceOverlay...")
-            visual_overlay = VisualIntelligenceOverlay()
-            self.log_text("✅ VisualIntelligenceOverlay initialized successfully")
+            # For now, initialize placeholders
+            self.visual_overlay = None  # Will be initialized in Phase 3
+            self.hover_detector = None  # Will be initialized in Phase 3
             
-        except ImportError as e:
-            self.log_text(f"❌ VisualIntelligenceOverlay import failed: {e}")
-            self.log_text(f"🔍 DEBUG: Import error details: {type(e).__name__}")
-            # Check if the file exists
-            overlay_path = os.path.join(os.getcwd(), "arena_bot", "ui", "visual_overlay.py")
-            self.log_text(f"🔍 DEBUG: File exists check: {os.path.exists(overlay_path)} at {overlay_path}")
-        except Exception as e:
-            self.log_text(f"❌ VisualIntelligenceOverlay initialization failed: {e}")
-            self.log_text(f"🔍 DEBUG: Error details: {type(e).__name__}")
-            import traceback
-            self.log_text(f"🔍 DEBUG: Stack trace: {traceback.format_exc()}")
-        
-        # Test 2: Import HoverDetector
-        try:
-            self.log_text("🔍 DEBUG: Attempting to import HoverDetector...")
-            from arena_bot.ui.hover_detector import HoverDetector
-            self.log_text("✅ HoverDetector import successful")
+            print("📋 Visual Intelligence components prepared for Phase 3 integration")
             
-            self.log_text("🔍 DEBUG: Attempting to initialize HoverDetector...")
-            hover_detector = HoverDetector()
-            self.log_text("✅ HoverDetector initialized successfully")
-            
-        except ImportError as e:
-            self.log_text(f"❌ HoverDetector import failed: {e}")
-            self.log_text(f"🔍 DEBUG: Import error details: {type(e).__name__}")
-            # Check if the file exists
-            hover_path = os.path.join(os.getcwd(), "arena_bot", "ui", "hover_detector.py")
-            self.log_text(f"🔍 DEBUG: File exists check: {os.path.exists(hover_path)} at {hover_path}")
-        except Exception as e:
-            self.log_text(f"❌ HoverDetector initialization failed: {e}")
-            self.log_text(f"🔍 DEBUG: Error details: {type(e).__name__}")
-            import traceback
-            self.log_text(f"🔍 DEBUG: Stack trace: {traceback.format_exc()}")
-        
-        # BULLETPROOF: Set components with detailed logging
-        self.visual_overlay = visual_overlay
-        self.hover_detector = hover_detector
-        
-        if visual_overlay or hover_detector:
-            self.log_text(f"✅ Visual intelligence partially available: overlay={visual_overlay is not None}, hover={hover_detector is not None}")
-            print("✅ Visual Intelligence components initialized successfully")
-        else:
-            self.log_text("ℹ️ Visual intelligence components not available - continuing with core functionality")
-            self.log_text("🔍 DEBUG: This is normal if Phase 3 components haven't been fully implemented yet")
-            print("⚠️ Visual Intelligence components unavailable - using core functionality")
+        except ImportError:
+            # Phase 3 components not yet available
+            print("📋 Visual Intelligence components will be available after Phase 3")
+            self.visual_overlay = None
+            self.hover_detector = None
     
     def _start_visual_intelligence(self):
         """
@@ -3205,45 +2735,11 @@ class IntegratedArenaBotGUI:
         return text
 
     def log_text(self, text):
-        """Add text to the log widget with S-Tier logging enhancement."""
-        # Original GUI logging functionality (preserved)
+        """Add text to the log widget."""
         if hasattr(self, 'log_text_widget'):
             self.log_text_widget.insert(tk.END, f"[{datetime.now().strftime('%H:%M:%S')}] {text}\n")
             self.log_text_widget.see(tk.END)
         print(text)  # Also print to console
-        
-        # Enhanced: Add S-Tier structured logging for observability
-        if hasattr(self, 'logger'):
-            try:
-                # Parse log level from text (simple heuristic)
-                if text.startswith('❌') or 'error' in text.lower() or 'failed' in text.lower():
-                    log_level = 'error'
-                elif text.startswith('⚠️') or 'warning' in text.lower():
-                    log_level = 'warning'
-                elif text.startswith('✅') or 'success' in text.lower() or 'ready' in text.lower():
-                    log_level = 'info'
-                elif text.startswith('🔍') or 'analyzing' in text.lower() or 'detecting' in text.lower():
-                    log_level = 'info'
-                else:
-                    log_level = 'info'
-                
-                # Create rich context for S-Tier logging
-                extra_context = {
-                    'gui_log_entry': {
-                        'original_text': text,
-                        'timestamp': datetime.now().isoformat(),
-                        'component': 'IntegratedArenaBotGUI',
-                        'thread_id': threading.current_thread().ident,
-                        'pipeline_state': getattr(self, '_pipeline_state', 'unknown')
-                    }
-                }
-                
-                # Log with appropriate level
-                getattr(self.logger, log_level)(f"GUI: {text}", extra=extra_context)
-                
-            except Exception as e:
-                # Silently continue if S-Tier logging fails - never break existing functionality
-                pass
     
     def update_status(self, status):
         """Update the status label."""
@@ -3471,25 +2967,6 @@ class IntegratedArenaBotGUI:
     
     def manual_screenshot(self):
         """Take and analyze a manual screenshot with non-blocking threading."""
-        # S-Tier logging: Manual analysis initiation
-        if hasattr(self, 'logger'):
-            self.logger.info("🎯 Manual screenshot analysis initiated", extra={
-                'manual_analysis_context': {
-                    'operation_type': 'manual_screenshot',
-                    'analysis_in_progress': getattr(self, 'analysis_in_progress', False),
-                    'draft_state': {
-                        'in_draft': getattr(self, 'in_draft', False),
-                        'current_hero': getattr(self, 'current_hero', None),
-                        'picks_count': getattr(self, 'draft_picks_count', 0)
-                    },
-                    'system_state': {
-                        'pipeline_state': getattr(self, '_pipeline_state', 'unknown'),
-                        'active_threads': len(getattr(self, '_active_threads', {})),
-                        'custom_coordinates': getattr(self, 'custom_coordinates', None) is not None
-                    }
-                }
-            })
-        
         # Prevent multiple simultaneous analyses
         if self.analysis_in_progress:
             self.log_text("⚠️ Analysis already in progress, please wait...")
@@ -3507,46 +2984,8 @@ class IntegratedArenaBotGUI:
         self.progress_bar.start(10)  # Start animation with 10ms intervals
         
         # Start the analysis in a background thread
-        analysis_thread = threading.Thread(target=self._run_analysis_in_thread, daemon=True, name="AI Analysis Worker")
-        
-        # BULLETPROOF: Register thread with comprehensive diagnostics and fallbacks
-        try:
-            self.log_text("🔍 DEBUG: About to register analysis thread")
-            self.log_text(f"🔍 DEBUG: self type: {type(self)}")
-            self.log_text(f"🔍 DEBUG: Has _register_thread method: {hasattr(self, '_register_thread')}")
-            self.log_text(f"🔍 DEBUG: Has _thread_lock: {hasattr(self, '_thread_lock')}")
-            self.log_text(f"🔍 DEBUG: Has _active_threads: {hasattr(self, '_active_threads')}")
-            
-            if hasattr(self, '_register_thread'):
-                self._register_thread(analysis_thread)
-                self.log_text("✅ Analysis thread registered successfully")
-            else:
-                self.log_text("⚠️ _register_thread method missing - using bulletproof fallback")
-                # BULLETPROOF FALLBACK: Create thread tracking infrastructure if missing
-                if not hasattr(self, '_active_threads'):
-                    self._active_threads = {}
-                    self.log_text("🔧 Created missing _active_threads dictionary")
-                if not hasattr(self, '_thread_lock'):
-                    self._thread_lock = threading.Lock()
-                    self.log_text("🔧 Created missing _thread_lock")
-                
-                # Manual thread registration with full error handling
-                with self._thread_lock:
-                    thread_id = analysis_thread.ident if hasattr(analysis_thread, 'ident') else id(analysis_thread)
-                    self._active_threads[thread_id] = {
-                        'thread': analysis_thread,
-                        'name': analysis_thread.name if hasattr(analysis_thread, 'name') else 'AI Analysis Worker',
-                        'created_at': time.time()
-                    }
-                self.log_text("✅ Analysis thread registered using bulletproof fallback method")
-                
-        except Exception as e:
-            self.log_text(f"❌ Thread registration failed: {e}")
-            self.log_text(f"🔍 DEBUG: Error type: {type(e).__name__}")
-            import traceback
-            self.log_text(f"🔍 DEBUG: Stack trace: {traceback.format_exc()}")
-            self.log_text("🔄 Continuing without thread registration (analysis will still work)")
-        
+        analysis_thread = threading.Thread(target=self._run_analysis_in_thread, daemon=True, name="AnalysisWorker")
+        self._register_thread(analysis_thread, "AI Analysis Worker")
         analysis_thread.start()
         
         # Reset polling interval for new analysis and start checking the queue
@@ -3662,42 +3101,8 @@ class IntegratedArenaBotGUI:
                 self.log_text("   This will eliminate Ultimate Detection delays after completion.")
                 
                 self.cache_build_in_progress = True
-                cache_build_thread = threading.Thread(target=self._build_cache_in_background, daemon=True, name="Background Cache Builder")
-                
-                # BULLETPROOF: Register cache build thread with comprehensive diagnostics and fallbacks
-                try:
-                    self.log_text("🔍 DEBUG: About to register cache build thread")
-                    
-                    if hasattr(self, '_register_thread'):
-                        self._register_thread(cache_build_thread)
-                        self.log_text("✅ Cache build thread registered successfully")
-                    else:
-                        self.log_text("⚠️ _register_thread method missing - using bulletproof fallback")
-                        # BULLETPROOF FALLBACK: Create thread tracking infrastructure if missing
-                        if not hasattr(self, '_active_threads'):
-                            self._active_threads = {}
-                            self.log_text("🔧 Created missing _active_threads dictionary")
-                        if not hasattr(self, '_thread_lock'):
-                            self._thread_lock = threading.Lock()
-                            self.log_text("🔧 Created missing _thread_lock")
-                        
-                        # Manual thread registration with full error handling
-                        with self._thread_lock:
-                            thread_id = cache_build_thread.ident if hasattr(cache_build_thread, 'ident') else id(cache_build_thread)
-                            self._active_threads[thread_id] = {
-                                'thread': cache_build_thread,
-                                'name': cache_build_thread.name if hasattr(cache_build_thread, 'name') else 'Background Cache Builder',
-                                'created_at': time.time()
-                            }
-                        self.log_text("✅ Cache build thread registered using bulletproof fallback method")
-                        
-                except Exception as e:
-                    self.log_text(f"❌ Cache build thread registration failed: {e}")
-                    self.log_text(f"🔍 DEBUG: Error type: {type(e).__name__}")
-                    import traceback
-                    self.log_text(f"🔍 DEBUG: Stack trace: {traceback.format_exc()}")
-                    self.log_text("🔄 Continuing without thread registration (cache build will still work)")
-                
+                cache_build_thread = threading.Thread(target=self._build_cache_in_background, daemon=True, name="CacheBuilder")
+                self._register_thread(cache_build_thread, "Background Cache Builder")
                 cache_build_thread.start()
             else:
                 self.log_text(f"✅ Feature cache ready ({total_cached} cards cached)")
@@ -5990,44 +5395,11 @@ def main():
     """Start the integrated arena bot with GUI."""
     print("🚀 Initializing Integrated Arena Bot GUI...")
     
-    # Initialize S-Tier logging for main entry point
-    try:
-        main_logger = get_logger(f"{__name__}.main") 
-        main_logger.info("🎯 Arena Bot application startup initiated", extra={
-            'application_startup': {
-                'version': 'integrated_gui_with_stier',
-                'features': [
-                    'log_monitoring',
-                    'visual_detection', 
-                    'ai_recommendations',
-                    'complete_gui',
-                    's_tier_logging'
-                ],
-                'startup_time': datetime.now().isoformat(),
-                'python_version': sys.version,
-                'platform': sys.platform
-            }
-        })
-    except Exception as e:
-        print(f"⚠️ S-Tier main logging initialization failed: {e}")
-        main_logger = None
-    
     try:
         bot = IntegratedArenaBotGUI()
-        if main_logger:
-            main_logger.info("✅ Arena Bot GUI initialized successfully, starting main loop")
         bot.run()
     except Exception as e:
-        error_msg = f"❌ Error starting bot: {e}"
-        print(error_msg)
-        if main_logger:
-            main_logger.error("💥 Arena Bot startup failed", extra={
-                'startup_error': {
-                    'error_type': type(e).__name__,
-                    'error_message': str(e),
-                    'stack_trace': str(e.__traceback__) if hasattr(e, '__traceback__') else 'unavailable'
-                }
-            }, exc_info=True)
+        print(f"❌ Error starting bot: {e}")
         input("Press Enter to exit...")
 
 if __name__ == "__main__":
