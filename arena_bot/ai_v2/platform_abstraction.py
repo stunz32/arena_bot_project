@@ -715,6 +715,19 @@ def is_linux() -> bool:
     return get_platform_layer().platform_type == PlatformType.LINUX
 
 
+def get_platform_manager() -> PlatformAbstractionLayer:
+    """
+    Get the platform manager instance (alias for get_platform_layer).
+    
+    This function provides compatibility with the expected import name
+    used by other components in the AI v2 system.
+    
+    Returns:
+        PlatformAbstractionLayer: The global platform abstraction layer instance
+    """
+    return get_platform_layer()
+
+
 # Export main components
 __all__ = [
     # Core Classes
@@ -735,6 +748,7 @@ __all__ = [
     
     # Factory Functions
     'get_platform_layer',
+    'get_platform_manager',  # Added missing function
     'get_system_info',
     
     # Convenience Functions

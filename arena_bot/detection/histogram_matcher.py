@@ -247,7 +247,7 @@ class HistogramMatcher:
         
         return matches
     
-    def match_card(self, image: np.ndarray, confidence_threshold: float = 0.35) -> Optional[CardMatch]:
+    def match_card(self, image: np.ndarray, confidence_threshold: float = 0.20) -> Optional[CardMatch]:
         """
         Match a single card image against the database.
         

@@ -74,9 +74,9 @@ class AdvancedTemplateValidator:
         self.RARITY_WEIGHT = 0.3         # Medium weight for rarity
         self.QUALITY_WEIGHT = 0.2        # Low weight for extraction quality
         
-        # Confidence thresholds
-        self.MIN_TEMPLATE_CONFIDENCE = 0.6
-        self.HIGH_CONFIDENCE_THRESHOLD = 0.8
+        # Confidence thresholds - further adjusted for better card detection
+        self.MIN_TEMPLATE_CONFIDENCE = 0.20  # Lowered from 0.30 to 0.20 for maximum permissiveness
+        self.HIGH_CONFIDENCE_THRESHOLD = 0.45  # Lowered from 0.65 to 0.45
         
         self.logger.info("AdvancedTemplateValidator initialized")
     

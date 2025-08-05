@@ -369,8 +369,23 @@ class SmartCoordinateDetector:
                         center_y = y + h // 2
                         mana_positions.append((center_x, center_y))
             
-            # Sort by x position (left to right) and take up to 3
+            # Sort by x position (left to right) and filter for proper spacing
             mana_positions.sort(key=lambda pos: pos[0])
+            
+            # Filter for proper spacing to avoid overlapping card regions
+            if len(mana_positions) > 1:
+                filtered_positions = [mana_positions[0]]  # Always include first
+                min_spacing = 200  # Minimum spacing between mana crystals for card regions
+                
+                for pos in mana_positions[1:]:
+                    if pos[0] - filtered_positions[-1][0] >= min_spacing:
+                        filtered_positions.append(pos)
+                    if len(filtered_positions) >= 3:
+                        break
+                
+                self.logger.info(f"Filtered mana positions from {len(mana_positions)} to {len(filtered_positions)} for proper spacing")
+                return filtered_positions
+            
             return mana_positions[:3]
             
         except Exception as e:
@@ -452,8 +467,8 @@ class SmartCoordinateDetector:
                     # Calculate horizontal distance between regions
                     distance = cx - (px + pw)  # Distance from end of prev to start of current
                     
-                    # Minimum spacing should be at least 20 pixels
-                    if distance < 20:
+                    # Minimum spacing should be at least 10 pixels (allow tighter spacing for Arena)
+                    if distance < 10:
                         self.logger.warning(f"Region spacing too small: {distance} pixels")
                         valid_spacing = False
                         break

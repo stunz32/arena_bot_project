@@ -639,13 +639,19 @@ class ArenaCardDatabase:
     def get_all_arena_cards(self) -> List[str]:
         """Get all arena-eligible cards across all classes."""
         if not self.arena_data:
+            self.logger.warning("No arena_data available - returning empty list")
             return []
         
         all_cards = set()
-        for cards in self.arena_data.classes.values():
+        for class_name, cards in self.arena_data.classes.items():
             all_cards.update(cards)
+            if len(all_cards) < 10:  # Log first few cards for debugging
+                self.logger.debug(f"Arena cards for {class_name}: {len(cards)} cards")
         
-        return list(all_cards)
+        card_list = list(all_cards)
+        self.logger.info(f"Total arena-eligible cards: {len(card_list)}")
+        
+        return card_list
     
     def is_card_arena_eligible(self, card_id: str, class_name: str = None) -> bool:
         """
@@ -752,8 +758,13 @@ class ArenaCardDatabase:
             # Create histogram dictionary for arena-eligible cards only
             arena_histograms = {}
             
-            for card_id in eligible_cards:
+            success_count = 0
+            for i, card_id in enumerate(eligible_cards):
                 try:
+                    # Add debug logging for first few cards
+                    if i < 5:
+                        self.logger.info(f"Attempting to load card {i+1}: {card_id}")
+                    
                     # Load card image (normal version)
                     card_image = asset_loader.load_card_image(card_id, premium=False)
                     if card_image is not None:
@@ -761,6 +772,9 @@ class ArenaCardDatabase:
                         from ..detection.histogram_matcher import calculate_histogram
                         histogram = calculate_histogram(card_image)
                         arena_histograms[card_id] = histogram
+                        success_count += 1
+                    elif i < 5:
+                        self.logger.warning(f"Failed to load normal image for {card_id}")
                     
                     # Also load premium version if available
                     premium_image = asset_loader.load_card_image(card_id, premium=True)
@@ -768,12 +782,18 @@ class ArenaCardDatabase:
                         from ..detection.histogram_matcher import calculate_histogram
                         premium_histogram = calculate_histogram(premium_image)
                         arena_histograms[f"{card_id}_premium"] = premium_histogram
+                        success_count += 1
+                    elif i < 5:
+                        self.logger.debug(f"No premium image for {card_id}")
                         
                 except Exception as e:
-                    self.logger.debug(f"Failed to load histogram for {card_id}: {e}")
+                    if i < 5:
+                        self.logger.error(f"Exception loading histogram for {card_id}: {e}")
+                    else:
+                        self.logger.debug(f"Failed to load histogram for {card_id}: {e}")
                     continue
             
-            self.logger.info(f"✅ Created {len(arena_histograms)} arena histograms")
+            self.logger.info(f"✅ Created {len(arena_histograms)} arena histograms from {len(eligible_cards)} eligible cards (success rate: {success_count}/{len(eligible_cards)*2} = {success_count/(len(eligible_cards)*2)*100:.1f}%)")
             return arena_histograms
             
         except Exception as e:

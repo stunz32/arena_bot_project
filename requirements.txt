@@ -10,6 +10,17 @@ urllib3==2.0.7
 
 # JSON and data handling
 jsonschema==4.19.2
+PyYAML==6.0.1
+
+# Machine Learning
+lightgbm==4.1.0
+
+# Caching and Performance
+lru-dict==1.2.0
+
+# Profiling (optional)
+memory-profiler==0.61.0
+line-profiler==4.1.1
 
 # Logging and utilities
 python-dateutil==2.8.2
