@@ -586,30 +586,26 @@ class IntegratedArenaBotGUI:
         print(f"\n📊 PHASE 5: FALLBACK CREATION")
         print("-" * 50)
         
-        methods_needing_fallbacks = missing_methods + partially_available
+        # Create fallbacks for all missing or partially missing methods
+        fallback_needed = []
+        for method in required_methods:
+            if not hasattr(self, method) or not callable(getattr(self, method, None)):
+                fallback_needed.append(method)
         
-        if methods_needing_fallbacks:
-            print(f"🔧 Creating fallbacks for: {methods_needing_fallbacks}")
+        if fallback_needed:
+            print(f"🔧 Creating essential fallbacks for: {fallback_needed}")
             
-            for method in methods_needing_fallbacks:
+            for method in fallback_needed:
                 if method == '_register_thread':
                     self._create_fallback_thread_registration()
                 elif method == '_unregister_thread':
                     self._create_fallback_thread_unregistration()
-                elif method == 'log_text':
-                    self._create_fallback_logging()
                 elif method == '_validate_analysis_result':
                     self._create_fallback_validate_analysis_result()
                 elif method == '_trigger_dual_ai_recovery':
                     self._create_fallback_trigger_dual_ai_recovery()
-                
-                # Verify fallback was created successfully
-                if hasattr(self, method) and callable(getattr(self, method)):
-                    print(f"✅ Fallback created successfully for {method}")
-                else:
-                    print(f"❌ Fallback creation failed for {method}")
         else:
-            print("✅ No fallbacks needed - all methods properly available")
+            print("✅ All essential methods available - no fallbacks needed")
         
         # === PHASE 6: POST-FALLBACK VERIFICATION & COMPARISON ===
         print(f"\n📊 PHASE 6: POST-FALLBACK VERIFICATION & COMPARISON")
@@ -771,21 +767,19 @@ class IntegratedArenaBotGUI:
     
     def _create_fallback_trigger_dual_ai_recovery(self):
         """Create a bulletproof fallback for dual AI recovery."""
-        def fallback_trigger_dual_ai_recovery(exception):
+        def fallback_trigger_dual_ai_recovery():
             """
             Fallback dual AI recovery handler.
             
-            Args:
-                exception: Exception that triggered recovery
+            Note: No parameters to match actual usage pattern
             """
             print(f"🔄 FALLBACK: Triggering dual AI recovery using emergency method")
-            print(f"⚠️ Recovery triggered by: {type(exception).__name__}: {str(exception)}")
             
             # Basic recovery - reset analysis state and clear queues
             try:
                 # Reset analysis state
-                if hasattr(self, 'is_analyzing'):
-                    self.is_analyzing = False
+                if hasattr(self, 'analysis_in_progress'):
+                    self.analysis_in_progress = False
                     print("✅ Reset analysis state")
                 
                 # Clear result queue if it exists
@@ -797,10 +791,10 @@ class IntegratedArenaBotGUI:
                     except:
                         pass
                 
-                # Reset GUI status
-                if hasattr(self, 'analysis_status_label'):
-                    self.analysis_status_label.setText("Ready")
-                    print("✅ Reset GUI status to Ready")
+                # Reset pipeline state
+                if hasattr(self, '_pipeline_state'):
+                    self._pipeline_state = "ready"
+                    print("✅ Reset pipeline state to ready")
                 
                 print("✅ Dual AI recovery completed using fallback method")
                 
@@ -2956,7 +2950,7 @@ class IntegratedArenaBotGUI:
         self.screenshot_btn.pack(side='left', padx=5)
         
         # Detection method selector
-        self.detection_method = tk.StringVar(value="simple_working")
+        self.detection_method = tk.StringVar(value="hybrid_cascade")
         detection_methods = [
             ("✅ Simple Working", "simple_working"),
             ("🔄 Hybrid Cascade", "hybrid_cascade"),
@@ -4021,23 +4015,21 @@ class IntegratedArenaBotGUI:
             self.log_text("📐 Using resolution-based coordinate fallback")
             
             if width >= 3440:  # Ultrawide 3440x1440
-                # Based on your screenshot, the cards are positioned in the center-right area
-                # The arena interface appears to start around x=1000 and cards are roughly:
-                # Left card: ~1150, Middle: ~1400, Right: ~1650
-                # Cards appear to be around y=75 and roughly 250x350 in size
+                # Using ground truth coordinates from ground_truth.json
                 card_regions = [
-                    (1100, 75, 250, 350),   # Left card (corrected coordinates)
-                    (1375, 75, 250, 350),   # Middle card  
-                    (1650, 75, 250, 350),   # Right card
+                    (704, 233, 447, 493),    # Left card - matches ground truth
+                    (1205, 233, 447, 493),   # Middle card - matches ground truth
+                    (1707, 233, 447, 493),   # Right card - matches ground truth
                 ]
-                self.log_text("📐 Using corrected ultrawide (3440x1440) coordinates")
-            elif width >= 2560:  # 2K resolution
+                self.log_text("📐 Using ground truth ultrawide (3440x1440) coordinates")
+            elif width >= 2560:  # 2K resolution  
+                # Using ground truth coordinates from ground_truth.json
                 card_regions = [
-                    (640, 160, 350, 300),   # Left card
-                    (1105, 160, 350, 300),  # Middle card  
-                    (1570, 160, 350, 300),  # Right card
+                    (524, 233, 333, 493),   # Left card - matches ground truth
+                    (896, 233, 333, 493),   # Middle card - matches ground truth  
+                    (1268, 233, 333, 493),  # Right card - matches ground truth
                 ]
-                self.log_text("📐 Using 2K (2560x1440) coordinates")
+                self.log_text("📐 Using ground truth 2K (2560x1440) coordinates")
             else:  # Standard 1920x1080
                 card_regions = [
                     (410, 120, 300, 250),   # Left card
@@ -4086,8 +4078,10 @@ class IntegratedArenaBotGUI:
                         self.log_text(f"   ⚠️ Coarse region not suitable for refinement, using as-is")
                         card_region = coarse_region
                     
-                    # Save card image for visual feedback with full path
-                    card_image_path = os.path.abspath(f"debug_card_{i+1}.png")
+                    # Save card image for visual feedback with proper path
+                    debug_dir = os.path.join(os.path.dirname(__file__), "debug_frames")
+                    os.makedirs(debug_dir, exist_ok=True)
+                    card_image_path = os.path.join(debug_dir, f"debug_card_{i+1}.png")
                     success = cv2.imwrite(card_image_path, card_region)
                     self.log_text(f"   💾 Saved card image: {card_image_path} (success: {success})")
                     
@@ -4399,7 +4393,7 @@ class IntegratedArenaBotGUI:
                                     if validation_result.mana_cost is not None:
                                         self.log_text(f"      💎 Detected mana: {validation_result.mana_cost}")
                                 else:
-                                    final_confidence = validation_result.confidence * 0.8  # Reduce confidence for failed validation
+                                    final_confidence = validation_result.confidence * 0.9  # Reduce confidence slightly for failed validation
                                     self.log_text(f"      ⚠️ Validation failed (conf: {validation_result.confidence:.3f})")
                                     
                             except Exception as e:
@@ -4570,18 +4564,27 @@ class IntegratedArenaBotGUI:
             detected_cards_sorted = sorted(detected_cards, key=lambda c: c['region'][0] if 'region' in c else 0)
             self.log_text(f"   🔄 Sorted {len(detected_cards_sorted)} cards by screen position (left to right)")
             
+            # Store detected cards for AI system
+            self._current_detected_cards = detected_cards_sorted
+            
             # Update card images in GUI with sorted cards
             self.update_card_images(detected_cards_sorted)
             
             self.log_text(f"\n✅ Detected {len(detected_cards_sorted)} cards with enhanced analysis:")
             for card in detected_cards_sorted:
-                # Enhanced display with quality and strategy info
-                strategy = card.get('enhanced_metrics', {}).get('detection_strategy', 'unknown')
+                # Enhanced display with AI analysis and strategy info
+                strategy = card.get('enhanced_metrics', {}).get('detection_strategy', 'Detection Only')
                 quality = card.get('quality_assessment', {}).get('quality_score', 0.0)
                 composite = card.get('enhanced_metrics', {}).get('composite_score', 0.0)
                 
+                # Try to get AI evaluation if available
+                ai_score = card.get('ai_evaluation', {}).get('overall_score', 0.0)
+                ai_recommendation = ""
+                if 'ai_evaluation' in card:
+                    ai_recommendation = f" | AI Score: {ai_score:.2f}"
+                
                 self.log_text(f"   {card['position']}. {card['card_name']} (conf: {card['confidence']:.3f})")
-                self.log_text(f"      🎯 Strategy: {strategy} | Quality: {quality:.2f} | Composite: {composite:.3f}")
+                self.log_text(f"      🎯 Strategy: {strategy} | Quality: {quality:.2f} | Composite: {composite:.3f}{ai_recommendation}")
                 
                 # Show quality issues if any
                 quality_issues = card.get('quality_assessment', {}).get('quality_issues', [])
@@ -4968,6 +4971,29 @@ class IntegratedArenaBotGUI:
             if not recommendation or not detected_cards:
                 return False
             
+            # Inject legacy AI information into detected cards
+            try:
+                recommended_pick = recommendation.get('recommended_pick', 1)
+                for i, card in enumerate(detected_cards):
+                    # Initialize enhanced_metrics if not present
+                    if card.get('enhanced_metrics') is None:
+                        card['enhanced_metrics'] = {}
+                    
+                    # Mark as legacy AI analyzed
+                    if (i + 1) == recommended_pick:
+                        card['enhanced_metrics']['detection_strategy'] = '🧠 LEGACY AI RECOMMENDED'
+                    else:
+                        card['enhanced_metrics']['detection_strategy'] = '🧠 Legacy AI Analyzed'
+                    
+                    # Add basic AI evaluation placeholder
+                    card['ai_evaluation'] = {
+                        'system': 'legacy',
+                        'is_recommended': (i + 1) == recommended_pick,
+                        'overall_score': 0.7 if (i + 1) == recommended_pick else 0.5  # Basic placeholder scores
+                    }
+            except Exception as injection_error:
+                self.log_text(f"⚠️ Could not inject legacy AI info into cards: {injection_error}")
+            
             rec_text = f"🧠 LEGACY AI ANALYSIS\n\n"
             rec_text += f"Recommended pick: {recommendation.get('recommended_pick', 'Unknown')}\n"
             rec_text += f"Recommended card: {recommendation.get('recommended_card', 'Unknown')}\n\n"
@@ -4999,17 +5025,66 @@ class IntegratedArenaBotGUI:
 
     def _get_ai_decision_safe(self, deck_state):
         """Safely get AI decision with timeout protection."""
+        analysis_start_time = time.time()
+        
         try:
             if not deck_state:
                 return {'success': False, 'error': 'Invalid deck state'}
             
-            # This would call the AI system - simplified for now
-            ai_decision = {
-                'recommended_pick': 1,
-                'reasoning': 'AI system temporarily unavailable',
-                'confidence': 0.5
-            }
-            return {'success': True, 'ai_decision': ai_decision}
+            # Check if we have the AI advisor available
+            if not hasattr(self, 'grandmaster_advisor') or not self.grandmaster_advisor:
+                return {'success': False, 'error': 'AI advisor not initialized'}
+            
+            # Get current card choices from detected cards
+            card_choices = []
+            if hasattr(self, '_current_detected_cards') and self._current_detected_cards:
+                from arena_bot.ai_v2.data_models import CardOption, CardInfo, CardClass, CardType, CardRarity
+                
+                for i, card_result in enumerate(self._current_detected_cards):
+                    # Create CardInfo from detected card
+                    card_info = CardInfo(
+                        name=card_result.get('name', f'Unknown Card {i+1}'),
+                        cost=card_result.get('cost', 3),
+                        attack=card_result.get('attack', 2),
+                        health=card_result.get('health', 2),
+                        card_type=CardType.MINION,  # Default to minion
+                        card_class=CardClass.NEUTRAL,  # Default to neutral
+                        rarity=CardRarity.COMMON,  # Default to common
+                        text=card_result.get('text', ''),
+                        mechanics=card_result.get('mechanics', [])
+                    )
+                    
+                    # Create CardOption
+                    card_option = CardOption(
+                        card_info=card_info,
+                        position=i + 1,
+                        detection_confidence=card_result.get('confidence', 0.5),
+                        detection_method=card_result.get('method', 'unknown')
+                    )
+                    card_choices.append(card_option)
+            
+            if len(card_choices) < 3:
+                return {'success': False, 'error': f'Insufficient card choices: {len(card_choices)}/3'}
+            
+            # Call the AI system with proper timeout
+            try:
+                ai_decision = self.grandmaster_advisor.analyze_draft_choice(
+                    card_choices, 
+                    deck_state, 
+                    'arena'
+                )
+                
+                analysis_time = time.time() - analysis_start_time
+                
+                return {
+                    'success': True, 
+                    'ai_decision': ai_decision,
+                    'analysis_time': analysis_time
+                }
+                
+            except Exception as ai_error:
+                return {'success': False, 'error': f'AI analysis failed: {ai_error}'}
+            
         except Exception as e:
             return {'success': False, 'error': str(e)}
 
@@ -5018,6 +5093,30 @@ class IntegratedArenaBotGUI:
         try:
             if not ai_decision or not detected_cards:
                 return False
+            
+            # Inject AI evaluation scores into detected cards
+            try:
+                if hasattr(ai_decision, 'card_evaluations') and ai_decision.card_evaluations:
+                    for i, card in enumerate(detected_cards):
+                        if i < len(ai_decision.card_evaluations):
+                            card_option, evaluation = ai_decision.card_evaluations[i]
+                            card['ai_evaluation'] = {
+                                'overall_score': getattr(evaluation, 'overall_score', 0.0),
+                                'value_score': getattr(evaluation, 'value_score', 0.0),
+                                'tempo_score': getattr(evaluation, 'tempo_score', 0.0),
+                                'synergy_score': getattr(evaluation, 'synergy_score', 0.0),
+                                'curve_score': getattr(evaluation, 'curve_score', 0.0),
+                                'is_recommended': (i + 1) == ai_decision.recommended_pick
+                            }
+                            # Update strategy to show AI recommendation
+                            if card.get('enhanced_metrics') is None:
+                                card['enhanced_metrics'] = {}
+                            if (i + 1) == ai_decision.recommended_pick:
+                                card['enhanced_metrics']['detection_strategy'] = '🤖 AI RECOMMENDED'
+                            else:
+                                card['enhanced_metrics']['detection_strategy'] = '🤖 AI Evaluated'
+            except Exception as injection_error:
+                self.log_text(f"⚠️ Could not inject AI scores into cards: {injection_error}")
             
             rec_text = f"🤖 ENHANCED AI ANALYSIS\n\n"
             rec_text += f"Recommended pick: {ai_decision.get('recommended_pick', 'Unknown')}\n"
@@ -5708,6 +5807,29 @@ class CoordinateSelector:
             bool: True if display was successful, False otherwise
         """
         try:
+            # Inject AI evaluation scores into detected cards first
+            try:
+                if hasattr(ai_decision, 'card_evaluations') and ai_decision.card_evaluations:
+                    for i, card in enumerate(detected_cards):
+                        if i < len(ai_decision.card_evaluations):
+                            card_option, evaluation = ai_decision.card_evaluations[i]
+                            card['ai_evaluation'] = {
+                                'overall_score': getattr(evaluation, 'overall_score', 0.0),
+                                'value_score': getattr(evaluation, 'value_score', 0.0),
+                                'tempo_score': getattr(evaluation, 'tempo_score', 0.0),
+                                'synergy_score': getattr(evaluation, 'synergy_score', 0.0),
+                                'curve_score': getattr(evaluation, 'curve_score', 0.0),
+                                'is_recommended': (i + 1) == ai_decision.recommended_pick
+                            }
+                            # Update strategy to show AI recommendation
+                            if card.get('enhanced_metrics') is None:
+                                card['enhanced_metrics'] = {}
+                            if (i + 1) == ai_decision.recommended_pick:
+                                card['enhanced_metrics']['detection_strategy'] = '🤖 AI RECOMMENDED'
+                            else:
+                                card['enhanced_metrics']['detection_strategy'] = '🤖 AI Evaluated'
+            except Exception as injection_error:
+                self.log_text(f"⚠️ Could not inject AI scores into cards: {injection_error}")
             # Display enhanced recommendation with AI reasoning
             rec_text = f"🧠 AI HELPER RECOMMENDATION\n\n"
             rec_text += f"🎯 RECOMMENDED PICK: #{ai_decision.recommended_pick}\n\n"

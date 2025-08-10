@@ -72,7 +72,6 @@ except ImportError as e:
 
 # Windows API imports for advanced overlay functionality
 try:
-    import pywin32  # Type: ignore
     from win32api import GetSystemMetrics
     from win32gui import (
         FindWindow, GetWindowRect, SetWindowPos, SetLayeredWindowAttributes,

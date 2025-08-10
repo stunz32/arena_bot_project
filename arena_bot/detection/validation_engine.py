@@ -38,7 +38,7 @@ class ValidationEngine:
         
         # Arena Tracker's validation parameters
         self.MANA_TOLERANCE = 1  # Allow ±1 mana cost difference
-        self.MIN_VALIDATION_CONFIDENCE = 0.6
+        self.MIN_VALIDATION_CONFIDENCE = 0.4  # Reduced from 0.6 to reduce false negatives
         
         self.logger.info("ValidationEngine initialized")
     

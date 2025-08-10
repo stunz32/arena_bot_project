@@ -992,6 +992,10 @@ class PerformanceMonitor:
             # Fail silently to avoid impacting monitored operations
             pass
             
+    def record_operation(self, operation_name: str, duration_ms: float):
+        """Record operation duration in milliseconds"""
+        self.record_metric(f"{operation_name}_duration", duration_ms, MetricType.GAUGE, {"unit": "ms"})
+        
     def start_timer(self, name: str, tags: Dict[str, str] = None) -> 'TimerContext':
         """Start a timer for measuring operation duration"""
         return TimerContext(self, name, tags)

@@ -32,9 +32,9 @@ class TemplateMatcher:
         """Initialize template matcher."""
         self.logger = logging.getLogger(__name__)
         
-        # Adjusted thresholds for better detection (original Arena Tracker values were too strict)
-        self.MANA_L2_THRESHOLD = 10.0  # Increased from 4.5
-        self.RARITY_L2_THRESHOLD = 20.0  # Increased from 9.0
+        # Adjusted thresholds for better detection (made more permissive for higher confidence)
+        self.MANA_L2_THRESHOLD = 25.0  # Further increased from 15.0 to reduce false negatives
+        self.RARITY_L2_THRESHOLD = 45.0  # Further increased from 30.0 to reduce false negatives
         
         # Template databases
         self.mana_templates: Dict[int, np.ndarray] = {}

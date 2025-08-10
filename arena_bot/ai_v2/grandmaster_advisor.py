@@ -1029,7 +1029,7 @@ class GrandmasterAdvisor:
                 # Step 7: Generate final decision with atomic operation
                 final_decision = self._generate_final_decision(
                     card_evaluations, deck_analysis, pivot_recommendation,
-                    greed_assessment, synergy_warnings, format_type
+                    greed_assessment, synergy_warnings, format_type, deck_state
                 )
                 
                 # Step 8: Create comprehensive audit entry
@@ -1132,7 +1132,8 @@ class GrandmasterAdvisor:
         pivot_recommendation: Optional[PivotRecommendation],
         greed_assessment: Dict[str, Any],
         synergy_warnings: List[str],
-        format_type: str
+        format_type: str,
+        deck_state: DeckState
     ) -> AIDecision:
         """Generate final AI decision with atomic operation"""
         # Find best card based on composite scores

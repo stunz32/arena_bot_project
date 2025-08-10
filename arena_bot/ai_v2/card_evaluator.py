@@ -38,7 +38,7 @@ import weakref
 # Import core data models
 from .data_models import (
     CardInfo, EvaluationScores, DeckState, ConfidenceLevel,
-    CardClass, CardType, CardRarity, DraftPhase
+    CardClass, CardType, CardRarity, DraftPhase, ArchetypePreference
 )
 from .exceptions import (
     AIModelError, ModelLoadError, ModelPredictionError,
