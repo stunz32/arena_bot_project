@@ -288,6 +288,36 @@ class IntegratedArenaBotGUI:
         
         # Mark pipeline as ready
         self._pipeline_state = "ready"
+    
+    @property 
+    def visual_overlay(self):
+        return self._visual_overlay
+    
+    @visual_overlay.setter
+    def visual_overlay(self, value):
+        # Ensure the private attribute exists
+        if not hasattr(self, '_visual_overlay'):
+            self._visual_overlay = None
+        if value != self._visual_overlay:
+            import traceback
+            self.log_text(f"🔍 DEBUG: visual_overlay changing from {self._visual_overlay} to {value}")
+            self.log_text(f"🔍 DEBUG: Stack trace: {traceback.format_stack()[-2]}")
+        self._visual_overlay = value
+    
+    @property
+    def hover_detector(self):
+        return self._hover_detector
+    
+    @hover_detector.setter
+    def hover_detector(self, value):
+        # Ensure the private attribute exists
+        if not hasattr(self, '_hover_detector'):
+            self._hover_detector = None
+        if value != self._hover_detector:
+            import traceback
+            self.log_text(f"🔍 DEBUG: hover_detector changing from {self._hover_detector} to {value}")
+            self.log_text(f"🔍 DEBUG: Stack trace: {traceback.format_stack()[-2]}")
+        self._hover_detector = value
         
         # Initialize debug systems
         self.debug_config = get_debug_config()
@@ -334,8 +364,8 @@ class IntegratedArenaBotGUI:
         self.archetype_preference = None
         self.event_queue = Queue(maxsize=50)  # Bounded main event queue for event-driven architecture
         self.event_polling_active = False  # Initialize before init_ai_helper_system()
-        self.visual_overlay = None
-        self.hover_detector = None
+        self._visual_overlay = None
+        self._hover_detector = None
         
         # Performance optimization: Adaptive polling system (Performance Fix 2)
         self.polling_interval = 100  # Start with 100ms
@@ -2030,11 +2060,16 @@ class IntegratedArenaBotGUI:
             
             # Try to initialize visual intelligence components (Phase 3 components)
             try:
+                self.log_text("🔍 DEBUG: About to call init_visual_intelligence()")
                 self.init_visual_intelligence()
+                self.log_text(f"🔍 DEBUG: After init_visual_intelligence() - visual_overlay={self.visual_overlay}, hover_detector={self.hover_detector}")
                 print("✅ AI Helper - Visual Intelligence initialized")
             except Exception as visual_error:
                 print(f"⚠️ Visual Intelligence not available: {visual_error}")
                 print("   AI Helper will work without visual overlay")
+                self.log_text(f"🔍 DEBUG: Visual Intelligence exception: {visual_error}")
+                import traceback
+                self.log_text(f"🔍 DEBUG: Visual Intelligence traceback: {traceback.format_exc()}")
             
             # Start event-driven architecture with safer initialization
             try:
@@ -2057,14 +2092,23 @@ class IntegratedArenaBotGUI:
             else:
                 print(f"⚠️ AI Helper system not available: Missing module - {import_error}")
                 print("   System will fall back to legacy AI advisor")
+            self.log_text(f"🔍 DEBUG: Import error - preserving visual components: visual_overlay={self.visual_overlay}, hover_detector={self.hover_detector}")
             self.grandmaster_advisor = None
             self.archetype_preference = None
+            # Visual components should remain intact regardless of AI Helper import issues
             
         except Exception as e:
             print(f"⚠️ AI Helper system not available: {e}")
             print("   System will fall back to legacy AI advisor")
+            self.log_text(f"🔍 DEBUG: AI Helper system exception: {e}")
+            import traceback
+            self.log_text(f"🔍 DEBUG: AI Helper system traceback: {traceback.format_exc()}")
+            self.log_text(f"🔍 DEBUG: Before clearing - visual_overlay={self.visual_overlay}, hover_detector={self.hover_detector}")
             self.grandmaster_advisor = None
             self.archetype_preference = None
+            # DON'T clear visual components - they should stay initialized
+            self.log_text(f"🔍 DEBUG: After clearing grandmaster only - visual_overlay={self.visual_overlay}, hover_detector={self.hover_detector}")
+            self.log_text("🔍 DEBUG: Visual components should remain available even if AI Helper fails")
     
     def init_visual_intelligence(self):
         """
@@ -2128,8 +2172,10 @@ class IntegratedArenaBotGUI:
             self.log_text(f"🔍 DEBUG: Stack trace: {traceback.format_exc()}")
         
         # BULLETPROOF: Set components with detailed logging
+        self.log_text(f"🔍 DEBUG: About to assign components - visual_overlay={visual_overlay}, hover_detector={hover_detector}")
         self.visual_overlay = visual_overlay
         self.hover_detector = hover_detector
+        self.log_text(f"🔍 DEBUG: Components assigned - self.visual_overlay={self.visual_overlay}, self.hover_detector={self.hover_detector}")
         
         if visual_overlay or hover_detector:
             self.log_text(f"✅ Visual intelligence partially available: overlay={visual_overlay is not None}, hover={hover_detector is not None}")
@@ -2145,6 +2191,11 @@ class IntegratedArenaBotGUI:
         Called when draft starts to activate visual overlay and hover detection.
         """
         try:
+            # Add detailed debugging to track component state
+            self.log_text(f"🔍 DEBUG: _start_visual_intelligence called")
+            self.log_text(f"🔍 DEBUG: self.visual_overlay = {self.visual_overlay} (type: {type(self.visual_overlay)})")
+            self.log_text(f"🔍 DEBUG: self.hover_detector = {self.hover_detector} (type: {type(self.hover_detector)})")
+            
             if self.visual_overlay:
                 self.visual_overlay.start()
                 self.log_text("🎨 Visual overlay started")
@@ -2157,6 +2208,7 @@ class IntegratedArenaBotGUI:
                 self.log_text("✅ Visual intelligence components activated")
             else:
                 self.log_text("ℹ️ Visual intelligence components not available (Phase 3)")
+                self.log_text("🔍 DEBUG: Both components are None or falsy - this should not happen if initialization succeeded")
                 
         except Exception as e:
             self.log_text(f"⚠️ Failed to start visual intelligence: {e}")
