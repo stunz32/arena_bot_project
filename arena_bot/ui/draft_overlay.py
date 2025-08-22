@@ -365,6 +365,38 @@ class DraftOverlay:
             self.root.quit()
             self.root.destroy()
 
+    def initialize(self):
+        """Initialize the overlay (creates window but doesn't start mainloop)."""
+        self.logger.info("Initializing draft overlay")
+        
+        # Create and setup window
+        self.root = self.create_overlay_window()
+        self.create_ui_elements()
+        
+        # Mark as running but don't start threads yet
+        self.running = True
+        
+        self.logger.info("Draft overlay initialized successfully")
+    
+    def _start_monitoring(self):
+        """Start monitoring for draft changes (for testing compatibility)."""
+        self.logger.info("Starting monitoring thread")
+        
+        if not self.running:
+            self.logger.warning("Cannot start monitoring - overlay not initialized")
+            return
+        
+        # Start auto-update thread
+        if not self.update_thread or not self.update_thread.is_alive():
+            self.update_thread = threading.Thread(target=self.auto_update_loop, daemon=True)
+            self.update_thread.start()
+            self.logger.info("Monitoring thread started")
+    
+    def cleanup(self):
+        """Clean up resources (for testing compatibility)."""
+        self.logger.info("Cleaning up draft overlay")
+        self.stop()
+
 
 def create_draft_overlay(config: OverlayConfig = None) -> DraftOverlay:
     """Create a new draft overlay instance."""

@@ -1,138 +1,189 @@
-You are an EXPERT software developer
+# CLAUDE.md
 
-Write concise, efficient code. ALWAYS COMMENT YOUR CODE. NEVER ERASE OLD COMMENTS IF THEY ARE STILL USEFUL
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-IMPORTANT GUIDELINES
-COMMENTING:
-Use clear and concise language
-Avoid stating the obvious (e.g., don't just restate what the code does)
-Focus on the "why" and "how" rather than just the "what"
-Use single-line comments for brief explanations
-Use multi-line comments for longer explanations or function/class descriptions
-Ensure comments are JSDoc3 styled
+## Project Overview
 
-LOGGING
-Log EVERY logical connection and workflow of the codebase
-Your output should be the original code with your added comments. Make sure to preserve the original code's formatting and structure.
+This is a **Hearthstone Arena Draft Assistant** that helps players make optimal card choices during Arena drafts using computer vision and AI. The system achieves 100% accuracy in card detection and identification through sophisticated image processing and database filtering.
 
-# Codebase Commenting Guidelines
+### Key Features
+- Real-time card detection during Arena drafts
+- AI-powered tier scoring and recommendations  
+- Cross-platform support (Windows native, Linux/WSL)
+- Visual overlay system for real-time guidance
+- Underground mode support with redraft functionality
 
-## Philosophy
+## Development Commands
 
-Our primary goal for commenting is *clarity and maintainability**. In a TypeScript codebase, types already provide significant information about the *what*. Therefore, our comments should focus on the **why**, the **intent**, and the **complexities* that aren't immediately obvious from the code and types alone.
+### Running the Application
 
-We use *JSDoc* as the standard format. This provides structure, integrates well with TypeScript's language server for enhanced IntelliSense, and offers a consistent format for both human developers and AI systems interacting with our code.
+**Linux/WSL:**
+```bash
+# Main application entry point
+python3 main.py
 
-Comments should add value. Avoid redundant comments that merely restate the obvious or duplicate type information. Prioritize commenting public APIs, complex logic, and non-intuitive decisions.
-
-## Core Standard: JSDoc
-
-All multi-line comments explaining functions, classes, types, components, hooks, or complex blocks should use the JSDoc format (`/** ... */`).
-
-## When to Comment
-
-Focus commenting efforts where they provide the most value:
-
-1.  *Public APIs / Exports:*
-    *   *Functions/Methods:* Explain purpose, parameters, return values, and any potential side effects or errors.
-    *   *React Components:* Describe the component's purpose, its props, and any significant state or behavior. Use `@param` for props.
-    *   *Custom Hooks:* Explain what the hook does, its parameters, and what it returns.
-    *   *Utility Functions/Classes:* Document any exported helpers or classes intended for reuse.
-    *   *Types/Interfaces:* Explain the purpose of complex or broadly used custom types if the name isn't self-explanatory.
-
-2.  *Complex Logic:*
-    *   If an algorithm, calculation, or piece of business logic is intricate or non-obvious, add comments explaining the approach and the reasoning behind it. Focus on the *why*.
-
-3.  *Non-Obvious Decisions & Trade-offs:*
-    *   If a particular implementation choice was made for specific reasons (performance, browser compatibility, workaround for a library bug), document it. This provides crucial context for future maintainers.
-
-4.  *Important Constants or Configuration:*
-    *   If the purpose of a constant isn't immediately clear from its name and value, add a brief explanation.
-
-5.  *Workarounds and `TODO`s:*
-    *   Use `// HACK:` or `// WORKAROUND:` for temporary fixes, explaining why the workaround is necessary and potentially linking to an issue tracker.
-    *   Use `// TODO:` for planned improvements or missing features, ideally with context or an issue link.
-
-6.  *Type Clarifications (Sparingly):*
-    *   In rare cases where TypeScript's inference might be ambiguous or a type needs further semantic meaning, a JSDoc `@type` tag or explanation can help. However, prefer refining the TypeScript types themselves first.
-
-## How to Comment with JSDoc (Essential Tags)
-
-Use clear, concise English. Start block comments with a brief summary sentence.
-
-```typescript
-/**
- * [Summary sentence explaining the overall purpose.]
- *
- * [Optional: More detailed explanation, rationale, or context.]
- *
- * @param {Type} name - [Description of the parameter's purpose and expected value.]
- * @param {Type} [optionalName] - [Description for optional parameter. Use brackets.]
- * @param {Type} [nameWithDefault='default'] - [Description for parameter with default.]
- * @param {object} options - Description of the options object.
- * @param {string} options.id - Description of the 'id' property within options.
- * @param {number} [options.count] - Description of optional 'count' property.
- * @returns {ReturnType} - [Description of what the function returns and why/when.]
- * @throws {ErrorType} - [Description of when/why this error might be thrown.]
- * @deprecated [Reason for deprecation and/or alternative to use.]
- * @see {Link/Reference} - [Link to related functions, documentation, or issue tracker.]
- * @example
- * ```typescript
- * // Example usage demonstrates how to call it.
- * const result = myFunction(inputValue);
- * console.log(result);
- * ```
- */
- function myFunction(name: string, options: { id: string; count?: number }): ReturnType {
-   // ...implementation
- }
-
-/**
- * Represents a user profile within the application.
- * Used across various UI components and API interactions.
- */
-export type UserProfile = {
-  /** Unique identifier for the user. */
-  id: string;
-  /** User's display name. May not be unique. */
-  name: string;
-  /** Optional email address. */
-  email?: string;
-};
-
-/**
- * Renders the main application layout, including header and footer.
- *
- * @param {object} props - Component properties.
- * @param {React.ReactNode} props.children - Content to be rendered within the layout.
- * @returns {JSX.Element} The main application layout structure.
- */
-export const MainLayout = ({ children }: { children: React.ReactNode }): JSX.Element => {
-  // ...implementation
-};
+# Main GUI application
+python3 integrated_arena_bot_gui.py
 ```
 
-*Key JSDoc Tags to Use:*
+**Windows:**
+```cmd
+# One-time setup
+SETUP_WINDOWS.bat
 
-*   *Description:* Always provide a clear summary. Add more detail if necessary.
-*   *`@param {Type} name - Description`**: Essential for functions/methods/hooks. Explain the *role of the parameter. TypeScript handles the type, JSDoc explains the *purpose*.
-*   *`@returns {Type} - Description`**: Explain *what is being returned and under what conditions, especially if it's complex or conditional.
-*   *`@props {object} - Description`* (Often implicit via `@param` in functional components): Used for documenting component props object. Individual props can be documented using `@param {Type} props.propName - Description`.
-*   **`@type {Type}`**: Use primarily for documenting constants or variables where type inference needs clarification (less common with explicit TS types).
-*   **`@example`**: Very helpful for demonstrating usage, especially for utilities or complex functions.
-*   **`@throws {ErrorType} - Condition`**: Document expected errors that callers might need to handle.
-*   **`@deprecated - Reason/Alternative`**: Crucial for managing API evolution.
-*   **`@see {Link/Reference}`**: Useful for linking to related code, external docs, or issue trackers.
+# Start the GUI application
+START_ARENA_BOT_WINDOWS.bat
+```
 
-## What NOT to Comment
+### Testing Commands
 
-*   *Obvious Code:* Don't explain code that is self-evident (e.g., `// Increment count` for `count++`).
-*   *Exact Type Duplication:* Avoid comments that just re-state the TypeScript type (e.g., `/** @param {string} userId - The user ID /` when the TS signature is `userId: string`). Focus on *purpose if adding a `@param` comment.
-*   *Version Control Information:* Don't add comments about authors or change history (`// Changed by John Doe on 2023-10-27`). Use `git blame` and commit history for this.
-*   *Outdated Comments:* Delete or update comments ruthlessly if the code changes. Incorrect comments are worse than no comments.
-*   *Commented-Out Code:* Remove dead code instead of commenting it out. Use version control to retrieve old code if needed.
+```bash
+# Main test suite
+python3 -m pytest tests/
 
+# Core component testing
+python3 test_core_components.py
+python3 test_detection_accuracy.py
 
+# Performance validation
+python3 test_performance_bottlenecks.py
+python3 test_ultimate_performance.py
 
+# End-to-end workflow validation
+python3 test_end_to_end_workflow.py
+python3 validation_suite.py
+```
 
+### Development Dependencies
 
+**Core Installation:**
+```bash
+pip install -r requirements.txt
+```
+
+**Platform-Specific:**
+```bash
+# Windows-specific dependencies
+pip install -r requirements_windows.txt
+
+# Testing dependencies  
+pip install -r requirements-test.txt
+
+# AI/ML components
+pip install -r requirements_ai_v2.txt
+```
+
+## Architecture Overview
+
+### Core Package Structure (`arena_bot/`)
+
+**Core Components (`arena_bot/core/`):**
+- `card_recognizer.py` - Main detection orchestrator and entry point
+- `smart_coordinate_detector.py` - Card position detection (100% accuracy)
+- `screen_detector.py` - Game state and screen detection
+- `window_detector.py` - Hearthstone window management
+- `thread_safe_state.py` - Thread-safe state management across components
+
+**Detection Algorithms (`arena_bot/detection/`):**
+- `histogram_matcher.py` - Arena Tracker-style histogram matching for card identification
+- `template_matcher.py` - Mana cost and rarity detection using template matching
+- `validation_engine.py` - Accuracy validation and confidence scoring
+- `ultimate_detector.py` - Combined detection pipeline orchestrator
+
+**Data Management (`arena_bot/data/`):**
+- `arena_card_database.py` - Card database management and loading
+- `card_eligibility_filter.py` - Smart database filtering (reduces DB by 80-85%)
+- `heartharena_tier_manager.py` - External tier score integration
+- `cards_json_loader.py` - JSON card data parsing and validation
+
+**User Interface (`arena_bot/gui/`, `arena_bot/ui/`):**
+- `draft_overlay.py` - Visual overlay for displaying recommendations
+- `visual_overlay.py` - Real-time display components and graphics
+- `settings_dialog.py` - Configuration and preferences GUI
+
+**AI & Analysis (`arena_bot/ai/`, `arena_bot/ai_v2/`):**
+- `draft_advisor.py` - Card recommendation engine
+- `grandmaster_advisor.py` - Advanced AI analysis and explanations
+- `conversational_coach.py` - Natural language card analysis
+
+### Key Architecture Patterns
+
+**Detection Pipeline:**
+1. `smart_coordinate_detector.py` identifies card positions (100% accuracy)
+2. `card_eligibility_filter.py` reduces database size by 80-85%
+3. `histogram_matcher.py` performs Arena Tracker-style card matching
+4. `template_matcher.py` validates mana costs and rarity
+5. `validation_engine.py` ensures accuracy through confidence scoring
+
+**Thread Safety:**
+- All components use `thread_safe_state.py` for coordinated state management
+- Async/await patterns throughout for performance
+- Thread-safe logging via `arena_bot/logging_system/`
+
+**Configuration System:**
+- `bot_config.json` - Runtime configuration
+- `arena_bot_logging_config.toml` - Comprehensive logging setup
+- `arena_bot/utils/config.py` - Configuration loading and validation
+
+## Code Style Guidelines
+
+### Documentation Standards
+- **JSDoc3 Format**: Use `/** ... */` for all multi-line comments
+- **Focus on Intent**: Comment the "why" and "how", not obvious "what"
+- **Required Documentation**:
+  - All public APIs and exported functions
+  - Complex algorithms and business logic
+  - Non-obvious design decisions and trade-offs
+  - Class and method docstrings with parameter descriptions
+
+### Python Conventions
+- **Type Hints**: Use modern Python typing throughout
+- **Async Patterns**: Leverage async/await for performance-critical code
+- **Error Handling**: Comprehensive exception handling with detailed logging
+- **Naming**: 
+  - Classes: `PascalCase` (e.g., `CardRecognizer`)
+  - Functions/methods: `snake_case` (e.g., `detect_cards`)
+  - Constants: `UPPER_SNAKE_CASE` (e.g., `CARD_POSITIONS`)
+  - Private members: Leading underscore (e.g., `_card_recognizer`)
+
+### Design Philosophy
+- **Minimal Changes**: Preserve existing functionality when enhancing
+- **Evidence-Based**: All modifications backed by testing and validation
+- **Modular Design**: Clear separation of concerns across packages
+- **Comprehensive Logging**: Log every logical workflow and decision point
+
+## Technology Stack
+
+**Core Dependencies:**
+- **GUI Framework**: PyQt6 (6.6.0) for modern interface
+- **Computer Vision**: OpenCV (4.8.1.78) for image processing
+- **Image Handling**: Pillow (10.0.0) for screenshots and manipulation
+- **Numerical Computing**: NumPy (1.24.3) for matrix operations
+- **Machine Learning**: LightGBM (4.1.0) for AI recommendations
+
+**Development Tools:**
+- **Testing**: pytest (7.4.3) with pytest-cov for coverage
+- **Performance**: memory-profiler, line-profiler for optimization
+- **Data Validation**: jsonschema for configuration validation
+
+## Development Workflow
+
+### Making Changes
+1. **Understand Current System**: Use existing logging and validation to understand behavior
+2. **Preserve Functionality**: Maintain 100% accuracy in card detection
+3. **Test Thoroughly**: Run detection accuracy tests before committing
+4. **Document Changes**: Update comments following JSDoc3 standards
+5. **Validate Performance**: Ensure changes don't impact real-time performance requirements
+
+### Testing Strategy
+- **Unit Tests**: Test individual components in isolation
+- **Integration Tests**: Validate component interactions
+- **Accuracy Tests**: Maintain 100% card detection accuracy
+- **Performance Tests**: Monitor real-time detection speed
+- **End-to-End Tests**: Validate complete workflow from screenshot to recommendation
+
+### Key Performance Targets
+- **Card Detection**: 100% accuracy maintained
+- **Real-time Performance**: Sub-second detection and recommendation
+- **Database Efficiency**: 80-85% reduction through smart filtering
+- **Memory Usage**: Efficient template and histogram caching

@@ -1,0 +1,11 @@
+{
+  "id": "negative_solid_color",
+  "name": "Negative Control: Solid_Color",
+  "fixture_type": "negative_control",
+  "expected_match": false,
+  "control_type": "solid_color",
+  "image_dimensions": [
+    200,
+    280
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "cards": [
+    {
+      "id": "fireball_4",
+      "name": "Fireball",
+      "mana_cost": 4,
+      "tier_score": 85.0
+    },
+    {
+      "id": "frostbolt_2",
+      "name": "Frostbolt",
+      "mana_cost": 2,
+      "tier_score": 72.0
+    },
+    {
+      "id": "arcane_intellect_3",
+      "name": "Arcane Intellect",
+      "mana_cost": 3,
+      "tier_score": 68.0
+    }
+  ]
+}

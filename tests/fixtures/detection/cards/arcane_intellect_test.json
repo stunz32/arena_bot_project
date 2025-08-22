@@ -1,0 +1,13 @@
+{
+  "id": "arcane_intellect_test",
+  "name": "Arcane Intellect",
+  "mana_cost": 3,
+  "rarity": "common",
+  "card_type": "spell",
+  "fixture_type": "positive_control",
+  "expected_match": true,
+  "image_dimensions": [
+    200,
+    280
+  ]
+}

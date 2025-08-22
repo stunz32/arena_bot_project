@@ -103,6 +103,18 @@ class ConfidenceLevel(Enum):
     HIGH = "high"
     VERY_HIGH = "very_high"
 
+class ConversationTone(Enum):
+    """AI conversation tone preferences"""
+    NEUTRAL = "neutral"
+    FRIENDLY = "friendly"
+    EXPERT = "expert"
+
+class UserSkillLevel(Enum):
+    """User skill level classifications"""
+    NOVICE = "novice"
+    INTERMEDIATE = "intermediate"
+    EXPERT = "expert"
+
 # === Manual Validation Helpers ===
 
 def validate_required_field(value: Any, field_name: str, expected_type: type = None):
@@ -189,6 +201,59 @@ class BaseDataModel:
         return hashlib.sha256(data_str.encode()).hexdigest()[:16]
 
 # === Card Data Models ===
+
+class CardInstance(BaseDataModel):
+    """
+    Instance of a Hearthstone card (alternative to CardInfo for test compatibility)
+    
+    Usage Example:
+        card = CardInstance(
+            name="Fireball",
+            cost=4,
+            attack=0,
+            health=0,
+            card_type="spell",
+            rarity="common"
+        )
+    """
+    
+    def __init__(
+        self,
+        name: str,
+        cost: int,
+        attack: int = 0,
+        health: int = 0,
+        card_type: str = "minion",
+        rarity: str = "common",
+        card_set: str = "",
+        keywords: List[str] = None,
+        description: str = "",
+        card_id: str = None,
+        collectible: bool = True,
+        **kwargs
+    ):
+        super().__init__(**kwargs)
+        
+        # Validate and set required fields
+        self.name = validate_required_field(name, "name", str)
+        self.cost = validate_range(validate_required_field(cost, "cost", int), "cost", 0, 30)
+        self.attack = validate_range(attack, "attack", 0, 50)
+        self.health = validate_range(health, "health", 0, 50)
+        self.card_type = card_type.lower()
+        self.rarity = rarity.lower()
+        self.card_set = card_set
+        self.keywords = keywords or []
+        self.description = description
+        self.card_id = card_id or f"{name.lower().replace(' ', '_')}_{cost}"
+        self.collectible = collectible
+    
+    def validate(self):
+        """Validate card instance data"""
+        if not self.name or len(self.name.strip()) == 0:
+            raise ValueError("Card name cannot be empty")
+        
+        if self.card_type == "minion" and self.health <= 0:
+            raise ValueError("Minions must have health > 0")
 
 class CardInfo(BaseDataModel):
     """
@@ -553,6 +618,59 @@ class StrategicContext(BaseDataModel):
         self.archetype_fit = validate_range(archetype_fit, "archetype_fit", 0.0, 1.0)
         self.curve_needs = curve_needs or {}
 
+class DraftChoice(BaseDataModel):
+    """
+    Represents a draft choice made during Arena drafting
+    
+    Usage Example:
+        choice = DraftChoice(
+            chosen_card=card_instance,
+            pick_number=5,
+            alternatives=[card1, card2],
+            reasoning="Best for curve"
+        )
+    """
+    
+    def __init__(
+        self,
+        chosen_card: 'CardInstance',
+        pick_number: int,
+        alternatives: List['CardInstance'] = None,
+        reasoning: str = "",
+        confidence: Union[ConfidenceLevel, str] = ConfidenceLevel.MEDIUM,
+        timestamp: str = None,
+        **kwargs
+    ):
+        super().__init__(**kwargs)
+        
+        self.chosen_card = chosen_card
+        self.pick_number = validate_range(pick_number, "pick_number", 1, 30)
+        self.alternatives = alternatives or []
+        self.reasoning = reasoning
+        
+        # Handle confidence enum
+        if isinstance(confidence, str):
+            try:
+                self.confidence = ConfidenceLevel(confidence)
+            except ValueError:
+                self.confidence = ConfidenceLevel.MEDIUM
+        else:
+            self.confidence = confidence
+            
+        self.timestamp = timestamp or datetime.now(timezone.utc).isoformat()
+    
+    def validate(self):
+        """Validate draft choice"""
+        if not isinstance(self.chosen_card, CardInstance):
+            raise ValueError("chosen_card must be a CardInstance")
+        
+        self.chosen_card.validate()
+        
+        for alt in self.alternatives:
+            if not isinstance(alt, CardInstance):
+                raise ValueError("alternatives must contain CardInstance objects")
+            alt.validate()
+
 class AIDecision(BaseDataModel):
     """
     Universal AI decision data contract
@@ -691,11 +809,11 @@ def create_ai_decision(recommended_pick: int, card_evaluations: List, **kwargs) 
 __all__ = [
     # Enums
     'CardClass', 'CardRarity', 'CardType', 'ArchetypePreference', 
-    'DraftPhase', 'ConfidenceLevel',
+    'DraftPhase', 'ConfidenceLevel', 'ConversationTone', 'UserSkillLevel',
     
     # Data Models
-    'BaseDataModel', 'CardInfo', 'CardOption', 'EvaluationScores',
-    'DeckState', 'StrategicContext', 'AIDecision',
+    'BaseDataModel', 'CardInstance', 'CardInfo', 'CardOption', 'EvaluationScores',
+    'DeckState', 'StrategicContext', 'DraftChoice', 'AIDecision',
     
     # Utilities
     'DataModelMigrator', 'validate_required_field', 'validate_range',

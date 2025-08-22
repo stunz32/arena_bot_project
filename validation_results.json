@@ -1,0 +1,130 @@
+{
+  "timestamp": "2025-08-21 18:36:14",
+  "phase3_components": {
+    "dpi_normalization": {
+      "name": "DPI Normalization",
+      "passed": true,
+      "exit_code": 0,
+      "test_count": 10,
+      "duration": 1.3536505699157715,
+      "output": null,
+      "error": null
+    },
+    "detection_accuracy": {
+      "name": "Histogram/Template Accuracy",
+      "passed": true,
+      "exit_code": 0,
+      "test_count": 21,
+      "duration": 2.360028028488159,
+      "output": null,
+      "error": null
+    },
+    "performance_budgets": {
+      "name": "Performance Budgets",
+      "passed": true,
+      "exit_code": 0,
+      "test_count": 10,
+      "duration": 1.2524080276489258,
+      "output": null,
+      "error": null
+    },
+    "thread_safety": {
+      "name": "Thread Safety",
+      "passed": true,
+      "exit_code": 0,
+      "test_count": 13,
+      "duration": 3.5234646797180176,
+      "output": null,
+      "error": null
+    },
+    "config_validation": {
+      "name": "Config Schema",
+      "passed": true,
+      "exit_code": 0,
+      "test_count": 20,
+      "duration": 1.7871198654174805,
+      "output": null,
+      "error": null
+    },
+    "e2e_fixtures": {
+      "name": "End-to-End Fixtures",
+      "passed": true,
+      "fixture_count": 2,
+      "fixtures_dir": "/mnt/d/cursor bots/arena_bot_project/tests/fixtures/end_to_end/drafts"
+    },
+    "card_fixtures": {
+      "name": "Card Detection Fixtures",
+      "passed": true,
+      "fixture_count": 9
+    },
+    "performance_integration": {
+      "name": "Performance Integration",
+      "passed": true,
+      "total_time": 92.3,
+      "budget_exceeded": false,
+      "stage_count": 6,
+      "summary": "3 stages, 92.3ms total (18.5% of 500.0ms budget), 3 skipped"
+    },
+    "config_schema": {
+      "name": "Configuration Schema",
+      "passed": true,
+      "errors": [],
+      "warnings": [],
+      "patch_version": "29.0"
+    }
+  },
+  "integration_tests": {
+    "replay_mode": {
+      "name": "Replay Mode",
+      "passed": true,
+      "frames_processed": 2,
+      "has_card_data": true,
+      "offline_mode": true
+    },
+    "diagnostic_output": {
+      "name": "Diagnostic Output",
+      "passed": true,
+      "has_output": true,
+      "has_budget_info": true,
+      "output_length": 502
+    }
+  },
+  "performance_summary": {
+    "stage_timings": {
+      "coordinates": 45.2,
+      "eligibility_filter": 18.7,
+      "histogram_match": 0.0,
+      "template_validation": 0.0,
+      "ai_advisor": 0.0,
+      "ui_render": 28.4
+    },
+    "stage_statuses": {
+      "coordinates": "ok",
+      "eligibility_filter": "warning",
+      "histogram_match": "skipped",
+      "template_validation": "skipped",
+      "ai_advisor": "skipped",
+      "ui_render": "ok"
+    },
+    "budget_compliance": {
+      "coordinates": true,
+      "eligibility_filter": true,
+      "histogram_match": true,
+      "template_validation": true,
+      "ai_advisor": true,
+      "ui_render": true
+    },
+    "total_ms": 92.3,
+    "total_budget_ms": 500,
+    "total_exceeded": false,
+    "summary": "3 stages, 92.3ms total (18.5% of 500.0ms budget), 3 skipped"
+  },
+  "overall_status": "excellent",
+  "actionable_failures": [],
+  "recommendations": [
+    "Excellent test coverage! Consider adding performance optimization tests"
+  ],
+  "pass_rate": 1.0,
+  "total_tests": 11,
+  "passed_tests": 11
+}

@@ -193,9 +193,10 @@ class OverlayConfiguration:
     target_monitor: int = -1  # -1 for auto-detect
     dpi_awareness: bool = True
     
-    # Game detection settings
+    # Game detection settings - Enhanced window title detection
     game_window_titles: List[str] = field(default_factory=lambda: [
-        "Hearthstone", "Hearthstone.exe", "Hearthstone Battle.net"
+        "Hearthstone", "Hearthstone.exe", "Hearthstone Battle.net",
+        "Hearthstone Arena", "Blizzard Entertainment", "Blizzard Games"
     ])
     
     # Error recovery settings
@@ -305,40 +306,78 @@ class WindowsAPIHelper:
     
     @staticmethod
     def find_game_window(window_titles: List[str]) -> Optional[int]:
-        """Find the game window handle"""
+        """Enhanced game window detection with comprehensive debugging"""
         if not WINDOWS_API_AVAILABLE:
+            logger.warning("Windows API not available - cannot detect game window")
             return None
         
+        logger.info(f"🔍 Starting game window detection with {len(window_titles)} titles to check")
+        
+        # Strategy 1: Exact title match
         for title in window_titles:
             try:
                 hwnd = FindWindow(None, title)
                 if hwnd and IsWindow(hwnd):
+                    logger.info(f"✅ Found game window via exact match: '{title}' (hwnd: {hwnd})")
                     return hwnd
+                else:
+                    logger.debug(f"   No exact match for '{title}'")
             except Exception as e:
-                logger.debug(f"Could not find window '{title}': {e}")
+                logger.debug(f"   Error checking title '{title}': {e}")
         
-        # Try to find by partial title match
+        # Strategy 2: Partial title match with comprehensive logging
+        logger.info("🔍 Trying partial title matching - scanning all windows...")
         game_windows = []
+        all_windows = []
         
         def enum_windows_proc(hwnd, lParam):
             try:
                 if IsWindow(hwnd):
                     window_text = GetWindowText(hwnd)
-                    for title in window_titles:
-                        if title.lower() in window_text.lower():
-                            game_windows.append(hwnd)
-                            return False  # Stop enumeration
+                    if window_text:  # Only log windows with text
+                        all_windows.append((hwnd, window_text))
+                        
+                        # Check for game window matches
+                        for title in window_titles:
+                            if title.lower() in window_text.lower():
+                                logger.info(f"✅ Found game window via partial match: '{window_text}' contains '{title}' (hwnd: {hwnd})")
+                                game_windows.append((hwnd, window_text, title))
+                                
+                        # Additional heuristics for Hearthstone detection
+                        if any(keyword in window_text.lower() for keyword in ['hearthstone', 'blizzard', 'battle.net']):
+                            logger.info(f"🎯 Potential Hearthstone window detected: '{window_text}' (hwnd: {hwnd})")
+                            if (hwnd, window_text, 'heuristic') not in [(g[0], g[1], 'heuristic') for g in game_windows]:
+                                game_windows.append((hwnd, window_text, 'heuristic'))
             except Exception:
                 pass
             return True
         
         try:
             EnumWindows(enum_windows_proc, 0)
+            
+            # Log summary of findings
+            logger.info(f"📊 Window scan complete: Found {len(all_windows)} windows with titles")
+            logger.info(f"🎯 Found {len(game_windows)} potential game windows")
+            
+            if logger.level <= logging.DEBUG:
+                logger.debug("🔍 All windows found:")
+                for hwnd, title in all_windows[:20]:  # Log first 20 to avoid spam
+                    logger.debug(f"   {hwnd}: '{title}'")
+                if len(all_windows) > 20:
+                    logger.debug(f"   ... and {len(all_windows) - 20} more windows")
+            
             if game_windows:
-                return game_windows[0]
+                # Return the window handle of the first match
+                selected_window = game_windows[0]
+                logger.info(f"🎯 Selected game window: '{selected_window[1]}' via {selected_window[2]} (hwnd: {selected_window[0]})")
+                return selected_window[0]
+            else:
+                logger.warning("❌ No game windows found with any detection strategy")
+                
         except Exception as e:
-            logger.debug(f"Error enumerating windows: {e}")
+            logger.error(f"❌ Error enumerating windows: {e}")
         
+        logger.warning("❌ Game window detection failed - overlay will not be positioned correctly")
         return None
     
     @staticmethod
@@ -624,15 +663,18 @@ class VisualIntelligenceOverlay:
     
     def _select_target_monitor(self):
         """
-        Select the target monitor for overlay display
+        Select the target monitor for overlay display with enhanced debugging
         
         Implements smart monitor selection based on game window position
         """
         if not self.monitors:
-            self.logger.error("No monitors available for overlay")
+            self.logger.error("❌ No monitors available for overlay")
             return
         
+        self.logger.info(f"🖥️ Selecting target monitor from {len(self.monitors)} available monitors")
+        
         # Try to find the game window first
+        self.logger.info("🎯 Attempting to detect game window for smart monitor selection...")
         self.game_window_hwnd = WindowsAPIHelper.find_game_window(
             self.config.game_window_titles
         )
@@ -644,27 +686,131 @@ class VisualIntelligenceOverlay:
                 game_center_x = (game_rect[0] + game_rect[2]) // 2
                 game_center_y = (game_rect[1] + game_rect[3]) // 2
                 
+                self.logger.info(f"🎯 Game window found at position: "
+                                f"({game_rect[0]}, {game_rect[1]}) to ({game_rect[2]}, {game_rect[3]})")
+                self.logger.info(f"🎯 Game window center: ({game_center_x}, {game_center_y})")
+                
                 # Find which monitor contains the game window
-                for monitor in self.monitors:
+                for i, monitor in enumerate(self.monitors):
+                    self.logger.debug(f"   Monitor {i}: {monitor.device_name} bounds: {monitor.bounds}")
                     if (monitor.bounds[0] <= game_center_x <= monitor.bounds[2] and
                         monitor.bounds[1] <= game_center_y <= monitor.bounds[3]):
                         self.target_monitor = monitor
-                        self.logger.info(f"Game window detected on monitor: {monitor.device_name}")
+                        self.logger.info(f"✅ Game window detected on monitor: {monitor.device_name}")
+                        self.logger.info(f"🖥️ Selected target monitor: {monitor.device_name} "
+                                        f"({monitor.width}x{monitor.height})")
                         return
+                
+                self.logger.warning(f"⚠️ Game window center ({game_center_x}, {game_center_y}) "
+                                   f"not found within any monitor bounds")
                         
             except Exception as e:
-                self.logger.debug(f"Could not get game window position: {e}")
+                self.logger.warning(f"⚠️ Could not get game window position: {e}")
+        else:
+            if not self.game_window_hwnd:
+                self.logger.warning("⚠️ Game window not found - using fallback monitor selection")
+            if not WINDOWS_API_AVAILABLE:
+                self.logger.warning("⚠️ Windows API not available - using fallback monitor selection")
         
         # Fallback: use primary monitor or first available
+        self.logger.info("🖥️ Using fallback monitor selection...")
         for monitor in self.monitors:
             if monitor.is_primary:
                 self.target_monitor = monitor
-                self.logger.info(f"Using primary monitor: {monitor.device_name}")
+                self.logger.info(f"✅ Using primary monitor: {monitor.device_name} "
+                                f"({monitor.width}x{monitor.height})")
                 return
         
         # Last fallback: use first monitor
         self.target_monitor = self.monitors[0]
-        self.logger.info(f"Using first available monitor: {self.target_monitor.device_name}")
+        self.logger.info(f"✅ Using first available monitor: {self.target_monitor.device_name} "
+                        f"({self.target_monitor.width}x{self.target_monitor.height})")
+    
+    def _calculate_overlay_position(self, overlay_width: int, overlay_height: int) -> Tuple[int, int]:
+        """
+        Calculate optimal overlay position relative to game window (PHASE 1.2 FIX)
+        
+        Args:
+            overlay_width: Width of the overlay in pixels
+            overlay_height: Height of the overlay in pixels
+            
+        Returns:
+            Tuple[int, int]: (x, y) coordinates for overlay position
+        """
+        self.logger.info("🎯 Calculating overlay position...")
+        
+        # Strategy 1: Position relative to detected game window
+        if self.game_window_hwnd and WINDOWS_API_AVAILABLE:
+            try:
+                # Get current game window position
+                game_rect = GetWindowRect(self.game_window_hwnd)
+                game_x, game_y, game_right, game_bottom = game_rect
+                game_width = game_right - game_x
+                game_height = game_bottom - game_y
+                
+                self.logger.info(f"🎯 Game window position: ({game_x}, {game_y}) size: {game_width}x{game_height}")
+                
+                # Check if window is minimized or has invalid size
+                if game_width <= 0 or game_height <= 0:
+                    self.logger.warning("⚠️ Game window appears minimized or invalid - using fallback positioning")
+                    return self._fallback_overlay_position(overlay_width, overlay_height)
+                
+                # Calculate overlay position for Hearthstone Arena card selection
+                # Position overlay at the bottom of the game window where cards typically appear
+                card_area_height = 200  # Approximate height of card selection area
+                
+                # Center horizontally over the game window
+                overlay_x = game_x + (game_width - overlay_width) // 2
+                
+                # Position vertically at the bottom of the game window 
+                # (where Arena cards typically appear)
+                overlay_y = game_bottom - card_area_height - overlay_height - 20  # 20px margin
+                
+                # Ensure overlay stays within monitor bounds
+                if self.target_monitor:
+                    monitor_left = self.target_monitor.bounds[0]
+                    monitor_top = self.target_monitor.bounds[1]
+                    monitor_right = self.target_monitor.bounds[2]
+                    monitor_bottom = self.target_monitor.bounds[3]
+                    
+                    # Clamp to monitor bounds
+                    overlay_x = max(monitor_left, min(overlay_x, monitor_right - overlay_width))
+                    overlay_y = max(monitor_top, min(overlay_y, monitor_bottom - overlay_height))
+                
+                self.logger.info(f"✅ Overlay positioned relative to game window: ({overlay_x}, {overlay_y})")
+                return overlay_x, overlay_y
+                
+            except Exception as e:
+                self.logger.warning(f"⚠️ Error calculating game window relative position: {e}")
+                return self._fallback_overlay_position(overlay_width, overlay_height)
+        
+        # Strategy 2: Fallback positioning
+        return self._fallback_overlay_position(overlay_width, overlay_height)
+    
+    def _fallback_overlay_position(self, overlay_width: int, overlay_height: int) -> Tuple[int, int]:
+        """
+        Fallback overlay positioning when game window detection fails
+        
+        Args:
+            overlay_width: Width of the overlay in pixels
+            overlay_height: Height of the overlay in pixels
+            
+        Returns:
+            Tuple[int, int]: (x, y) coordinates for overlay position
+        """
+        self.logger.info("🔄 Using fallback overlay positioning...")
+        
+        if not self.target_monitor:
+            # Emergency fallback - center on primary display
+            self.logger.warning("⚠️ No monitor information - using emergency positioning")
+            return 100, 100
+        
+        # Position at top center of the target monitor (original behavior)
+        x = self.target_monitor.bounds[0] + (self.target_monitor.width - overlay_width) // 2
+        y = self.target_monitor.bounds[1] + 50  # 50px from top
+        
+        self.logger.info(f"✅ Fallback overlay position: ({x}, {y})")
+        return x, y
     
     def _initialize_ui(self) -> bool:
         """
@@ -700,9 +846,8 @@ class VisualIntelligenceOverlay:
             overlay_height = int((self.config.card_height + 
                                 self.config.overlay_padding * 2) * self.target_monitor.dpi_scale)
             
-            # Position overlay at the top of the target monitor
-            x = self.target_monitor.bounds[0] + (self.target_monitor.width - overlay_width) // 2
-            y = self.target_monitor.bounds[1] + 50  # 50px from top
+            # Position overlay relative to game window or monitor (PHASE 1.2 FIX)
+            x, y = self._calculate_overlay_position(overlay_width, overlay_height)
             
             self.root.geometry(f"{overlay_width}x{overlay_height}+{x}+{y}")
             self.root.resizable(False, False)
@@ -901,24 +1046,81 @@ class VisualIntelligenceOverlay:
         
         self.logger.info("Overlay update loop finished")
     
+    def _update_overlay_position(self):
+        """
+        Check and update overlay position if game window has moved (PHASE 1.2)
+        
+        This method ensures the overlay follows the game window if it's moved or resized
+        """
+        if not self.root or not self.game_window_hwnd or not WINDOWS_API_AVAILABLE:
+            return
+        
+        try:
+            # Get current game window position
+            current_game_rect = GetWindowRect(self.game_window_hwnd)
+            current_game_x, current_game_y, current_game_right, current_game_bottom = current_game_rect
+            
+            # Check if we have stored the previous position
+            if not hasattr(self, '_last_game_position'):
+                self._last_game_position = current_game_rect
+                return
+            
+            # Compare with last known position
+            last_game_rect = self._last_game_position
+            position_changed = (
+                current_game_x != last_game_rect[0] or
+                current_game_y != last_game_rect[1] or
+                current_game_right != last_game_rect[2] or
+                current_game_bottom != last_game_rect[3]
+            )
+            
+            if position_changed:
+                self.logger.info(f"🎯 Game window moved - updating overlay position")
+                self.logger.info(f"   Old position: {last_game_rect}")
+                self.logger.info(f"   New position: {current_game_rect}")
+                
+                # Get current overlay size
+                overlay_width = self.root.winfo_width()
+                overlay_height = self.root.winfo_height()
+                
+                # Calculate new overlay position
+                new_x, new_y = self._calculate_overlay_position(overlay_width, overlay_height)
+                
+                # Update overlay position
+                self.root.geometry(f"{overlay_width}x{overlay_height}+{new_x}+{new_y}")
+                
+                # Store new game window position
+                self._last_game_position = current_game_rect
+                
+                self.logger.info(f"✅ Overlay repositioned to ({new_x}, {new_y})")
+            
+        except Exception as e:
+            self.logger.debug(f"Error updating overlay position: {e}")
+            # Don't spam logs with positioning errors
+    
     def _update_display(self):
         """
         Update the overlay display with current AI decision
         
         This method renders the AI recommendations on the overlay canvas
         """
-        if not self.root or not self.canvas or not self.current_decision:
+        if not self.root or not self.canvas:
             return
         
         try:
-            # Clear the canvas
-            self.canvas.delete("all")
+            # PHASE 1.2: Check and update overlay position if game window moved
+            self._update_overlay_position()
             
-            # P3.1.12: Theme Change Resilience
-            self.canvas.configure(bg=self.config.background_color)
-            
-            # Draw the AI recommendations
-            self._draw_recommendations()
+            # Only draw if we have a decision to display
+            if self.current_decision:
+                # Clear the canvas
+                self.canvas.delete("all")
+                
+                # P3.1.12: Theme Change Resilience
+                self.canvas.configure(bg=self.config.background_color)
+                
+                # Draw the AI recommendations
+                self._draw_recommendations()
             
             # Update the display
             self.root.update_idletasks()
@@ -1119,6 +1321,9 @@ def create_visual_overlay(config: OverlayConfiguration = None) -> VisualIntellig
         VisualIntelligenceOverlay: Configured overlay instance
     """
     return VisualIntelligenceOverlay(config)
+
+# Backward compatibility alias
+VisualOverlay = VisualIntelligenceOverlay
 
 # Main function for testing
 def main():

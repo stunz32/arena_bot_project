@@ -1,0 +1,11 @@
+{
+  "id": "negative_mana_gem_fake",
+  "name": "Negative Control: Mana_Gem_Fake",
+  "fixture_type": "negative_control",
+  "expected_match": false,
+  "control_type": "mana_gem_fake",
+  "image_dimensions": [
+    200,
+    280
+  ]
+}

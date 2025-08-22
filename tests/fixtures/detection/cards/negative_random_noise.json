@@ -1,0 +1,11 @@
+{
+  "id": "negative_random_noise",
+  "name": "Negative Control: Random_Noise",
+  "fixture_type": "negative_control",
+  "expected_match": false,
+  "control_type": "random_noise",
+  "image_dimensions": [
+    200,
+    280
+  ]
+}

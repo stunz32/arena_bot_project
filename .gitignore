@@ -1,15 +1,27 @@
 # Exclude assets folder (too many files)
 assets/
 
-# Python
+# Virtual environments and test environments
+.venv/
+env/
+test_env/
+venv/
+ENV/
+arena_venv/
+venv_fixed/
+
+# Python bytecode and cache
 __pycache__/
 *.py[cod]
+*.pyd
 *$py.class
 *.so
 .Python
+
+# Build and distribution
 build/
-develop-eggs/
 dist/
+develop-eggs/
 downloads/
 eggs/
 .eggs/
@@ -23,24 +35,9 @@ wheels/
 .installed.cfg
 *.egg
 
-# Virtual environments
-venv/
-env/
-ENV/
-arena_venv/
-venv_fixed/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Logs
-logs/
-*.log
-
-# Debug images and frames
+# Debug and artifacts
+.debug_runs/
+artifacts/
 debug_card_*.png
 debug_*.png
 screenshot_*.png
@@ -53,6 +50,18 @@ test_card_region_*.png
 debug_set*_card*.png
 newest.png
 aoejao.png
+
+# IDE and tools
+.claude/
+.serena/
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+logs/
+*.log
 
 # Temporary files
 *.tmp

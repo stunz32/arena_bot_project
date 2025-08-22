@@ -713,6 +713,63 @@ class AIHelperError(AIHelperException):
     """
     pass
 
+# === Missing Exception Classes ===
+
+class AIProcessingError(AIHelperException):
+    """AI processing operation failed"""
+    
+    def __init__(self, message: str, **kwargs):
+        kwargs.setdefault('category', ErrorCategory.AI_MODEL)
+        super().__init__(message, **kwargs)
+
+class AIResponseError(AIHelperException):
+    """AI response was invalid or unexpected"""
+    
+    def __init__(self, message: str, **kwargs):
+        kwargs.setdefault('category', ErrorCategory.AI_MODEL)
+        super().__init__(message, **kwargs)
+
+class NetworkError(AIHelperException):
+    """Network operation failed"""
+    
+    def __init__(self, message: str, **kwargs):
+        kwargs.setdefault('category', ErrorCategory.INTEGRATION)
+        super().__init__(message, **kwargs)
+
+class APIError(NetworkError):
+    """API call failed"""
+    pass
+
+class AuthenticationError(SecurityError):
+    """Authentication failed"""
+    pass
+
+class ErrorHandler:
+    """Utility class for handling exceptions consistently"""
+    
+    @staticmethod
+    def wrap_exception(e: Exception, context: str = "") -> AIHelperException:
+        """Wrap a generic exception in AIHelperException"""
+        if isinstance(e, AIHelperException):
+            return e
+        
+        return AIHelperException(
+            message=f"{context}: {str(e)}" if context else str(e),
+            severity=ErrorSeverity.MEDIUM,
+            category=ErrorCategory.SYSTEM
+        )
+
+# === Compatibility Aliases ===
+
+# Add expected exception class aliases for test compatibility
+AIEngineError = AIHelperException
+ModelLoadingError = ModelLoadError
+InferenceTimeout = PerformanceThresholdExceeded
+InvalidInputError = DataValidationError
+ValidationError = DataValidationError
+AnalysisError = AIModelError
+ConfidenceError = AIModelError
+
 # Export list for public API
 __all__ = [
     # Base exceptions
@@ -731,5 +788,8 @@ __all__ = [
     # UI exceptions
     'UIError', 'AIHelperUIError', 'AIHelperPerformanceError', 'AIHelperPlatformError', 'AIHelperNotSupportedError',
     # Utilities
-    'ErrorHandler', 'ErrorSeverity', 'ErrorCategory'
+    'ErrorHandler', 'ErrorSeverity', 'ErrorCategory',
+    # Test compatibility aliases
+    'AIEngineError', 'ModelLoadingError', 'InferenceTimeout', 'InvalidInputError',
+    'ValidationError', 'AnalysisError', 'ConfidenceError'
 ]

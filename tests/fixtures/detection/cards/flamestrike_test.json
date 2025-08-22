@@ -1,0 +1,13 @@
+{
+  "id": "flamestrike_test",
+  "name": "Flamestrike",
+  "mana_cost": 7,
+  "rarity": "common",
+  "card_type": "spell",
+  "fixture_type": "positive_control",
+  "expected_match": true,
+  "image_dimensions": [
+    200,
+    280
+  ]
+}

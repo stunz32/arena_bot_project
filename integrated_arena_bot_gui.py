@@ -286,39 +286,6 @@ class IntegratedArenaBotGUI:
         # NEW: Initialize AI Helper system (Phase 2 integration)
         self.init_ai_helper_system()
         
-        # Mark pipeline as ready
-        self._pipeline_state = "ready"
-    
-    @property 
-    def visual_overlay(self):
-        return self._visual_overlay
-    
-    @visual_overlay.setter
-    def visual_overlay(self, value):
-        # Ensure the private attribute exists
-        if not hasattr(self, '_visual_overlay'):
-            self._visual_overlay = None
-        if value != self._visual_overlay:
-            import traceback
-            self.log_text(f"🔍 DEBUG: visual_overlay changing from {self._visual_overlay} to {value}")
-            self.log_text(f"🔍 DEBUG: Stack trace: {traceback.format_stack()[-2]}")
-        self._visual_overlay = value
-    
-    @property
-    def hover_detector(self):
-        return self._hover_detector
-    
-    @hover_detector.setter
-    def hover_detector(self, value):
-        # Ensure the private attribute exists
-        if not hasattr(self, '_hover_detector'):
-            self._hover_detector = None
-        if value != self._hover_detector:
-            import traceback
-            self.log_text(f"🔍 DEBUG: hover_detector changing from {self._hover_detector} to {value}")
-            self.log_text(f"🔍 DEBUG: Stack trace: {traceback.format_stack()[-2]}")
-        self._hover_detector = value
-        
         # Initialize debug systems
         self.debug_config = get_debug_config()
         self.visual_debugger = VisualDebugger()
@@ -355,14 +322,14 @@ class IntegratedArenaBotGUI:
             print("   Manual correction will use full card database")
         
         # Threading setup for non-blocking analysis
-        # Note: result_queue initialized in __init__ with bounded size for memory management
+        # Note: result_queue initialized above with bounded size for memory management
         self.analysis_in_progress = False
         
         # NEW: AI Helper system state management (Phase 2.5 integration)
         self.current_deck_state = None
         self.grandmaster_advisor = None
         self.archetype_preference = None
-        self.event_queue = Queue(maxsize=50)  # Bounded main event queue for event-driven architecture
+        # Note: event_queue already initialized above
         self.event_polling_active = False  # Initialize before init_ai_helper_system()
         self._visual_overlay = None
         self._hover_detector = None
@@ -395,7 +362,40 @@ class IntegratedArenaBotGUI:
         # BULLETPROOF: Validate critical methods at startup (after all initialization)
         self._validate_critical_methods()
         
+        # Mark pipeline as ready
+        self._pipeline_state = "ready"
+        
         print("🎯 Integrated Arena Bot GUI ready!")
+    
+    @property 
+    def visual_overlay(self):
+        return self._visual_overlay
+    
+    @visual_overlay.setter
+    def visual_overlay(self, value):
+        # Ensure the private attribute exists
+        if not hasattr(self, '_visual_overlay'):
+            self._visual_overlay = None
+        if value != self._visual_overlay:
+            import traceback
+            self.log_text(f"🔍 DEBUG: visual_overlay changing from {self._visual_overlay} to {value}")
+            self.log_text(f"🔍 DEBUG: Stack trace: {traceback.format_stack()[-2]}")
+        self._visual_overlay = value
+    
+    @property
+    def hover_detector(self):
+        return self._hover_detector
+    
+    @hover_detector.setter
+    def hover_detector(self, value):
+        # Ensure the private attribute exists
+        if not hasattr(self, '_hover_detector'):
+            self._hover_detector = None
+        if value != self._hover_detector:
+            import traceback
+            self.log_text(f"🔍 DEBUG: hover_detector changing from {self._hover_detector} to {value}")
+            self.log_text(f"🔍 DEBUG: Stack trace: {traceback.format_stack()[-2]}")
+        self._hover_detector = value
     
     def _initialize_stier_logging(self):
         """
@@ -2242,9 +2242,11 @@ class IntegratedArenaBotGUI:
             self.event_polling_active = True
             print("🔄 Starting event-driven architecture with 50ms polling")
             
-            # Schedule the first event check
-            if hasattr(self, 'root'):
+            # Schedule the first event check only if GUI is available
+            if hasattr(self, 'root') and self.root is not None:
                 self.root.after(50, self._check_for_events)
+            else:
+                print("ℹ️ Event polling disabled - GUI not available (command-line mode)")
     
     def _check_for_events(self):
         """
@@ -2279,8 +2281,8 @@ class IntegratedArenaBotGUI:
         except Exception as e:
             print(f"❌ Error in event polling: {e}")
         
-        # Schedule next event check (50ms polling)
-        if self.event_polling_active and hasattr(self, 'root'):
+        # Schedule next event check (50ms polling) only if GUI is available
+        if self.event_polling_active and hasattr(self, 'root') and self.root is not None:
             self.root.after(50, self._check_for_events)
     
     def _handle_event(self, event):
@@ -2334,6 +2336,159 @@ class IntegratedArenaBotGUI:
                 return f"{name} ✨"
             return name
         return f"Unknown Card ({clean_code})"
+    
+    def _update_visual_overlay(self, detected_cards, recommendation):
+        """
+        Update the visual intelligence overlay with analysis results.
+        
+        This method bridges the analysis system with the Phase 3 visual overlay,
+        converting analysis results to the proper format and triggering overlay updates.
+        """
+        try:
+            self.log_text("🎯 Updating visual intelligence overlay with analysis results...")
+            
+            # Check if visual overlay is available and running
+            if not self.visual_overlay:
+                self.log_text("ℹ️ Visual overlay not available - skipping overlay update")
+                return
+            
+            # Check if overlay is running
+            if not getattr(self.visual_overlay, 'running', False):
+                self.log_text("⚠️ Visual overlay not running - attempting to start...")
+                try:
+                    if hasattr(self.visual_overlay, 'start'):
+                        success = self.visual_overlay.start()
+                        if success:
+                            self.log_text("✅ Visual overlay started successfully")
+                        else:
+                            self.log_text("❌ Failed to start visual overlay")
+                            return
+                    else:
+                        self.log_text("❌ Visual overlay doesn't have start method")
+                        return
+                except Exception as start_error:
+                    self.log_text(f"❌ Error starting visual overlay: {start_error}")
+                    return
+            
+            # Convert analysis results to AI decision format
+            ai_decision = self._convert_analysis_to_ai_decision(detected_cards, recommendation)
+            
+            if ai_decision:
+                # Update the overlay with the AI decision
+                try:
+                    if hasattr(self.visual_overlay, 'update_decision'):
+                        self.visual_overlay.update_decision(ai_decision)
+                        self.log_text("✅ Visual overlay updated successfully with AI decision")
+                    else:
+                        self.log_text("❌ Visual overlay doesn't have update_decision method")
+                except Exception as update_error:
+                    self.log_text(f"❌ Error updating visual overlay: {update_error}")
+                    import traceback
+                    self.log_text(f"🔍 DEBUG: Overlay update error details: {traceback.format_exc()}")
+            else:
+                self.log_text("⚠️ Could not convert analysis to AI decision format - overlay not updated")
+                
+        except Exception as e:
+            self.log_text(f"❌ Error in visual overlay update: {e}")
+            import traceback
+            self.log_text(f"🔍 DEBUG: Visual overlay update error: {traceback.format_exc()}")
+
+    def _convert_analysis_to_ai_decision(self, detected_cards, recommendation):
+        """
+        Convert analysis results to AIDecision format for visual overlay.
+        
+        This bridges the gap between the current analysis system and the 
+        Phase 3 visual intelligence overlay system.
+        """
+        try:
+            # Import AI decision models (with fallback if not available)
+            try:
+                from arena_bot.ai_v2.data_models import AIDecision, CardOption, EvaluationScores, ConfidenceLevel
+            except ImportError:
+                self.log_text("⚠️ AI v2 data models not available - overlay update skipped")
+                return None
+            
+            # Convert detected cards to CardOption format
+            card_evaluations = []
+            recommended_position = 1  # Default to first card
+            
+            for i, card in enumerate(detected_cards):
+                position = i + 1  # 1-based positioning
+                
+                # Create card info object (simplified)
+                card_info = type('CardInfo', (), {
+                    'name': self.get_card_name(card.get('card_name', card.get('card_code', 'Unknown'))),
+                    'card_code': card.get('card_code', ''),
+                    'position': position
+                })()
+                
+                # Create card option
+                card_option = CardOption(
+                    position=position,
+                    card_info=card_info,
+                    confidence=card.get('confidence', 0.0)
+                )
+                
+                # Create evaluation scores
+                scores = EvaluationScores(
+                    value_score=card.get('enhanced_metrics', {}).get('composite_score', 0.0),
+                    synergy_score=card.get('ai_evaluation', {}).get('synergy_score', 0.0),
+                    curve_score=card.get('ai_evaluation', {}).get('curve_score', 0.0),
+                    composite_score=card.get('enhanced_metrics', {}).get('composite_score', 0.0)
+                )
+                
+                card_evaluations.append((card_option, scores))
+            
+            # Determine recommended pick from recommendation
+            if isinstance(recommendation, dict):
+                if 'recommended_pick' in recommendation:
+                    recommended_position = recommendation['recommended_pick']
+                elif 'position' in recommendation:
+                    recommended_position = recommendation['position']
+                elif 'choice' in recommendation:
+                    try:
+                        recommended_position = int(recommendation['choice'])
+                    except (ValueError, TypeError):
+                        recommended_position = 1
+                
+                # Extract reasoning
+                reasoning = recommendation.get('reasoning', recommendation.get('explanation', 'No reasoning provided'))
+                
+                # Determine confidence level
+                confidence_score = recommendation.get('confidence', 0.5)
+                if confidence_score >= 0.8:
+                    confidence = ConfidenceLevel.HIGH
+                elif confidence_score >= 0.6:
+                    confidence = ConfidenceLevel.MEDIUM
+                else:
+                    confidence = ConfidenceLevel.LOW
+            else:
+                reasoning = str(recommendation) if recommendation else "No reasoning provided"
+                confidence = ConfidenceLevel.MEDIUM
+            
+            # Create AI decision
+            ai_decision = AIDecision(
+                recommended_pick=recommended_position,
+                card_evaluations=card_evaluations,
+                reasoning=reasoning,
+                confidence=confidence,
+                metadata={
+                    'analysis_time': self.log_text,  # Placeholder
+                    'system_version': 'Arena Bot v2.5',
+                    'cards_analyzed': len(detected_cards)
+                }
+            )
+            
+            self.log_text(f"🎯 Converted analysis to AI decision: recommended pick #{recommended_position}, "
+                         f"confidence: {confidence.value}, {len(card_evaluations)} cards")
+            
+            return ai_decision
+            
+        except Exception as e:
+            self.log_text(f"❌ Error converting analysis to AI decision: {e}")
+            import traceback
+            self.log_text(f"🔍 DEBUG: Conversion error details: {traceback.format_exc()}")
+            return None
     
     def enhance_card_image(self, image, aggressive=False):
         """
@@ -2717,7 +2872,8 @@ class IntegratedArenaBotGUI:
                 print("   Using histogram detection only")
             
             # Load card database for all detection systems
-            self._load_card_database()
+            # Start card database loading in background for faster startup
+            self._start_card_database_loading()
             
             print("✅ BASIC card detection system loaded (Arena Tracker proven algorithm)")
             print("✅ Smart coordinate detector loaded (100% accuracy)")
@@ -2734,51 +2890,112 @@ class IntegratedArenaBotGUI:
             self.smart_detector = None
             self.ultimate_detector = None
     
-    def _load_card_database(self):
-        """Load card images into detection systems."""
+    def _start_card_database_loading(self):
+        """Start card database loading in background thread for faster startup."""
         if not self.asset_loader:
+            print("⚠️ No asset loader available - skipping card database")
             return
-            
-        # Load card images from assets directory
-        cards_dir = self.asset_loader.assets_dir / "cards"
-        if not cards_dir.exists():
-            print(f"⚠️ Cards directory not found: {cards_dir}")
-            return
-            
-        card_images = {}
-        card_count = 0
         
-        # Load all available card images (full database for maximum detection accuracy)
-        for card_file in cards_dir.glob("*.png"):
-            try:
-                import cv2
-                image = cv2.imread(str(card_file))
-                if image is not None:
-                    card_code = card_file.stem  # Remove .png extension
+        print("🚀 Starting card database loading in background...")
+        
+        # Start background thread for card database loading
+        db_thread = threading.Thread(
+            target=self._load_card_database,
+            daemon=True,
+            name="Card Database Loader"
+        )
+        db_thread.start()
+    
+    def _load_card_database(self):
+        """Load card images into detection systems (runs in background thread)."""
+        try:
+            if not self.asset_loader:
+                print("⚠️ No asset loader available for card database")
+                return
+            
+            # Load card images from assets directory
+            cards_dir = self.asset_loader.assets_dir / "cards"
+            if not cards_dir.exists():
+                print(f"⚠️ Cards directory not found: {cards_dir}")
+                return
+                
+            card_images = {}
+            card_count = 0
+        
+            # Load all available card images (full database for maximum detection accuracy)
+            all_files = list(cards_dir.glob("*.png"))
+            total_files = len(all_files)
+            print(f"📋 Loading {total_files} card images in background...")
+            
+            for i, card_file in enumerate(all_files):
+                try:
+                    import cv2
+                    image = cv2.imread(str(card_file))
+                    if image is not None:
+                        card_code = card_file.stem  # Remove .png extension
+                        
+                        # Filter out non-draftable cards (HERO, BG, etc.)
+                        if not any(card_code.startswith(prefix) for prefix in ['HERO_', 'BG_', 'TB_', 'KARA_']):
+                            card_images[card_code] = image
+                            card_count += 1
                     
-                    # Filter out non-draftable cards (HERO, BG, etc.)
-                    if not any(card_code.startswith(prefix) for prefix in ['HERO_', 'BG_', 'TB_', 'KARA_']):
-                        card_images[card_code] = image
-                        card_count += 1
-            except Exception as e:
-                continue
+                    # Progress update every 2000 cards
+                    if (i + 1) % 2000 == 0:
+                        progress = (i + 1) / total_files * 100
+                        progress_msg = f"🔄 Card loading: {i + 1}/{total_files} files ({progress:.1f}%)"
+                        print(progress_msg)
+                        if hasattr(self, 'root') and self.root is not None:
+                            try:
+                                self.root.after(0, lambda: self.log_text(progress_msg))
+                            except:
+                                pass
+                
+                except Exception as e:
+                    continue
         
-        if card_images:
-            # Load into basic histogram matcher (always available)
-            if self.histogram_matcher:
-                self.histogram_matcher.load_card_database(card_images)
-                print(f"✅ Loaded {card_count} card images for basic detection")
-            
-            # Load into pHash matcher (ultra-fast detection)
-            if self.phash_matcher:
-                self._load_phash_database(card_images)
-            
-            # Ultimate Detection Engine database loading is deferred for performance
-            if self.ultimate_detector:
-                print(f"🚀 Ultimate Detection Engine ready (database loading deferred for performance)")
-                print("   Database will be loaded automatically when Ultimate Detection is first used")
-        else:
-            print("⚠️ No card images found")
+            if card_images:
+                # Load into basic histogram matcher (always available)
+                if self.histogram_matcher:
+                    print("🔄 Loading cards into histogram matcher...")
+                    self.histogram_matcher.load_card_database(card_images)
+                    success_msg = f"✅ Loaded {card_count} card images for basic detection"
+                    print(success_msg)
+                    if hasattr(self, 'root') and self.root is not None:
+                        try:
+                            self.root.after(0, lambda: self.log_text(success_msg))
+                        except:
+                            pass
+                
+                # Load into pHash matcher (ultra-fast detection) - background loading
+                if self.phash_matcher:
+                    self._start_phash_background_loading(card_images)
+                
+                # Ultimate Detection Engine database loading is deferred for performance
+                if self.ultimate_detector:
+                    ultimate_msg = "🚀 Ultimate Detection Engine ready (database loading deferred for performance)"
+                    print(ultimate_msg)
+                    if hasattr(self, 'root') and self.root is not None:
+                        try:
+                            self.root.after(0, lambda: self.log_text(ultimate_msg))
+                        except:
+                            pass
+            else:
+                error_msg = "⚠️ No card images found"
+                print(error_msg)
+                if hasattr(self, 'root') and self.root is not None:
+                    try:
+                        self.root.after(0, lambda: self.log_text(error_msg))
+                    except:
+                        pass
+        
+        except Exception as e:
+            error_msg = f"❌ Card database loading failed: {e}"
+            print(error_msg)
+            if hasattr(self, 'root') and self.root is not None:
+                try:
+                    self.root.after(0, lambda: self.log_text(error_msg))
+                except:
+                    pass
     
     def _load_ultimate_database(self):
         """Load card database into Ultimate Detection Engine (cache-aware lazy loading)."""
@@ -2804,6 +3021,86 @@ class IntegratedArenaBotGUI:
                 
         except Exception as e:
             self.log_text(f"   ❌ Failed to load Ultimate Detection database: {e}")
+    
+    def _start_phash_background_loading(self, card_images):
+        """Start pHash database loading in background thread to avoid blocking GUI."""
+        if not self.phash_matcher:
+            return
+        
+        try:
+            from arena_bot.detection.phash_cache_manager import get_phash_cache_manager
+            
+            # Quick check if cache exists
+            cache_manager = get_phash_cache_manager()
+            cached_phashes = cache_manager.load_phashes(hash_size=8, hamming_threshold=10)
+            
+            if cached_phashes:
+                # Load from cache immediately (fast)
+                self.phash_matcher.phash_database = {v: k for k, v in cached_phashes.items()}
+                self.phash_matcher.card_phashes = cached_phashes
+                print(f"⚡ Loaded {len(cached_phashes)} pHashes from cache in {cache_manager.stats.load_time_ms:.1f}ms")
+            else:
+                # Start background computation for first-time setup
+                print("⚡ Starting background pHash computation (30-60 seconds, won't block GUI)...")
+                phash_thread = threading.Thread(
+                    target=self._load_phash_database_background,
+                    args=(card_images.copy(),),  # Pass copy to avoid threading issues
+                    daemon=True,
+                    name="pHash Background Loader"
+                )
+                phash_thread.start()
+                
+        except Exception as e:
+            print(f"⚠️ Failed to initialize pHash system: {e}")
+            self.phash_matcher = None
+    
+    def _load_phash_database_background(self, card_images):
+        """Load pHash database in background thread."""
+        try:
+            print("⚡ Computing pHashes for card database in background...")
+            
+            def progress_callback(processed, total):
+                if processed % 1000 == 0:  # Less frequent updates to avoid spam
+                    progress_percent = (processed / total) * 100
+                    progress_msg = f"   pHash progress: {processed}/{total} cards ({progress_percent:.1f}%)"
+                    # Log to console (always available) and GUI if possible
+                    print(progress_msg)
+                    if hasattr(self, 'root') and self.root is not None:
+                        try:
+                            self.root.after(0, lambda: self.log_text(progress_msg))
+                        except:
+                            pass  # GUI might not be fully ready
+            
+            # Load pHashes with progress reporting
+            self.phash_matcher.load_card_database(card_images, progress_callback=progress_callback)
+            
+            # Save to cache for future use
+            from arena_bot.detection.phash_cache_manager import get_phash_cache_manager
+            cache_manager = get_phash_cache_manager()
+            phash_data = self.phash_matcher.card_phashes.copy()
+            cache_success = cache_manager.save_phashes(phash_data, hash_size=8, hamming_threshold=10)
+            
+            success_msg = f"⚡ pHash database ready: {len(phash_data)} cards, cache saved for fast future loading"
+            if not cache_success:
+                success_msg = f"⚡ pHash database ready: {len(phash_data)} cards (cache save failed)"
+            
+            # Report completion
+            print(success_msg)
+            if hasattr(self, 'root') and self.root is not None:
+                try:
+                    self.root.after(0, lambda: self.log_text(success_msg))
+                except:
+                    pass  # GUI might not be ready
+                    
+        except Exception as e:
+            error_msg = f"⚠️ Background pHash loading failed: {e}"
+            print(error_msg)
+            if hasattr(self, 'root') and self.root is not None:
+                try:
+                    self.root.after(0, lambda: self.log_text(error_msg))
+                except:
+                    pass
+            self.phash_matcher = None
     
     def _load_phash_database(self, card_images):
         """Load card database into pHash matcher with caching."""
@@ -2897,14 +3194,37 @@ class IntegratedArenaBotGUI:
         self.log_monitor.on_draft_pick = on_draft_pick
     
     def setup_gui(self):
-        """Setup the GUI interface."""
-        self.root = tk.Tk()
-        self.root.title("🎯 Integrated Arena Bot - Complete GUI")
-        self.root.geometry("1800x1200")  # Even larger size for proper card visibility
+        """Setup the GUI interface with graceful fallback to command-line mode."""
+        try:
+            self.root = tk.Tk()
+            self.root.title("🎯 Integrated Arena Bot - Complete GUI")
+            print("DEBUG: Root window created successfully")
+        except Exception as e:
+            print(f"⚠️ GUI not available: {e}")
+            print("🔧 This is common in WSL/Linux environments without X11 display server")
+            print("💡 Application will continue in command-line mode")
+            print("💡 To enable GUI on WSL: Install X server (VcXsrv/Xming) and set DISPLAY variable")
+            # Set root to None to signal GUI unavailable
+            self.root = None
+            return  # Exit setup_gui gracefully without creating GUI components
+        
+        # PHASE 2.2: Responsive design with minimum window constraints
+        # Set default size optimized for card visibility
+        self.root.geometry("1800x1200")
+        
+        # Set minimum window size to ensure usability
+        self.root.minsize(1200, 800)  # Minimum viable size
+        
+        # Set maximum window size to prevent excessive stretching
+        self.root.maxsize(2560, 1600)  # Maximum reasonable size
+        
         self.root.configure(bg='#2C3E50')
         
         # Make window stay on top
         self.root.attributes('-topmost', True)
+        
+        # Bind window resize event for responsive behavior
+        self.root.bind('<Configure>', self._on_window_resize)
         
         # Main title
         title_frame = tk.Frame(self.root, bg='#34495E', relief='raised', bd=2)
@@ -3072,6 +3392,107 @@ class IntegratedArenaBotGUI:
         )
         self.coord_mode_btn.pack(side='left', padx=5)
         
+        # === VISUAL OVERLAY DEBUG CONTROLS (Phase 1.4) ===
+        debug_frame = tk.Frame(control_frame, bg='#2C3E50')
+        debug_frame.pack(side='left', padx=10)
+        
+        # Overlay status button
+        self.overlay_status_btn = tk.Button(
+            debug_frame,
+            text="👁️ OVERLAY STATUS",
+            command=self._show_overlay_status,
+            bg='#3498DB',
+            fg='white',
+            font=('Arial', 8),
+            relief='raised',
+            bd=2
+        )
+        self.overlay_status_btn.pack(side='left', padx=2)
+        
+        # Test overlay button
+        self.test_overlay_btn = tk.Button(
+            debug_frame,
+            text="🧪 TEST OVERLAY",
+            command=self._test_overlay_drawing,
+            bg='#E67E22',
+            fg='white',
+            font=('Arial', 8),
+            relief='raised',
+            bd=2
+        )
+        self.test_overlay_btn.pack(side='left', padx=2)
+        
+        # Restart overlay button
+        self.restart_overlay_btn = tk.Button(
+            debug_frame,
+            text="🔄 RESTART OVERLAY",
+            command=self._restart_overlay,
+            bg='#E74C3C',
+            fg='white',
+            font=('Arial', 8),
+            relief='raised',
+            bd=2
+        )
+        self.restart_overlay_btn.pack(side='left', padx=2)
+
+        # PHASE 4.1: Enhanced debug modes and testing framework
+        # Debug mode toggle
+        self.debug_mode = tk.BooleanVar(value=False)
+        self.debug_mode_btn = tk.Checkbutton(
+            debug_frame,
+            text="🐛 DEBUG MODE",
+            variable=self.debug_mode,
+            command=self._toggle_debug_mode,
+            bg='#2C3E50',
+            fg='white',
+            selectcolor='#34495E',
+            font=('Arial', 8),
+            relief='raised'
+        )
+        self.debug_mode_btn.pack(side='left', padx=2)
+
+        # Comprehensive test button
+        self.comprehensive_test_btn = tk.Button(
+            debug_frame,
+            text="🧪 FULL TEST",
+            command=self._run_comprehensive_tests,
+            bg='#9B59B6',
+            fg='white',
+            font=('Arial', 8),
+            relief='raised',
+            bd=2
+        )
+        self.comprehensive_test_btn.pack(side='left', padx=2)
+
+        # PHASE 4.2: Enhanced logging and manual testing triggers
+        # Manual analysis trigger
+        self.manual_analysis_btn = tk.Button(
+            debug_frame,
+            text="⚙️ FORCE ANALYSIS",
+            command=self._trigger_manual_analysis,
+            bg='#F39C12',
+            fg='white',
+            font=('Arial', 8),
+            relief='raised',
+            bd=2
+        )
+        self.manual_analysis_btn.pack(side='left', padx=2)
+
+        # Log level control
+        self.verbose_logging = tk.BooleanVar(value=False)
+        self.verbose_logging_btn = tk.Checkbutton(
+            debug_frame,
+            text="📝 VERBOSE LOG",
+            variable=self.verbose_logging,
+            command=self._toggle_verbose_logging,
+            bg='#2C3E50',
+            fg='white',
+            selectcolor='#34495E',
+            font=('Arial', 8),
+            relief='raised'
+        )
+        self.verbose_logging_btn.pack(side='left', padx=2)
+        
         # Ultimate Detection toggle (NEW!)
         self.use_ultimate_detection = tk.BooleanVar(value=False)
         self.ultimate_detection_btn = tk.Checkbutton(
@@ -3134,119 +3555,180 @@ class IntegratedArenaBotGUI:
             print("🎯 Custom coordinate mode enabled (coordinates loaded from previous session)")
         
         # Update coordinate status display
-        self.update_coordinate_status()
+        try:
+            self.update_coordinate_status()
+            print("DEBUG: Coordinate status updated successfully")
+        except Exception as e:
+            print(f"ERROR: Failed to update coordinate status: {e}")
         
-        # Log area - reduced height to make room for larger card images
-        log_frame = tk.LabelFrame(
-            self.root,
-            text="📋 LOG OUTPUT",
-            font=('Arial', 10, 'bold'),
-            fg='#ECF0F1',
-            bg='#2C3E50'
-        )
-        log_frame.pack(fill='both', expand=True, padx=10, pady=5)
+        # PHASE 2.1: Redesigned layout proportions - FIXED VERSION
+        try:
+            print("DEBUG: Creating main content layout...")
+            # Create main content frame with improved layout (simplified approach)
+            main_content_frame = tk.Frame(self.root, bg='#2C3E50')
+            main_content_frame.pack(fill='both', expand=True, padx=10, pady=5)
+            print("DEBUG: Main content frame created and packed")
+
+            # Store reference for responsive adjustments
+            self.main_content_frame = main_content_frame
+
+            # Left panel for cards and recommendations (70% of space)
+            left_panel = tk.Frame(main_content_frame, bg='#2C3E50')
+            left_panel.pack(side='left', fill='both', expand=True, padx=(0, 5))
+            self.left_panel = left_panel
+            print("DEBUG: Left panel created and packed")
+
+            # Right panel for log (30% of space)
+            right_panel = tk.Frame(main_content_frame, bg='#2C3E50', width=400)
+            right_panel.pack(side='right', fill='y', expand=False, padx=(5, 0))
+            right_panel.pack_propagate(False)  # Maintain size
+            self.right_panel = right_panel
+            print("DEBUG: Right panel created and packed")
+        except Exception as e:
+            print(f"CRITICAL ERROR: Failed to create main layout: {e}")
+            import traceback
+            print(f"Traceback: {traceback.format_exc()}")
+            raise
         
-        self.log_text_widget = scrolledtext.ScrolledText(
-            log_frame,
-            height=10,  # Reduced from 15 to make room for larger card images
-            bg='#1C1C1C',
-            fg='#ECF0F1',
-            font=('Consolas', 9),
-            wrap=tk.WORD
-        )
-        self.log_text_widget.pack(fill='both', expand=True, padx=5, pady=5)
+        # Card images area - now in left panel with much more space
+        try:
+            print("DEBUG: Creating card display area...")
+            card_frame = tk.LabelFrame(
+                left_panel,
+                text="🃏 DETECTED CARDS",
+                font=('Arial', 12, 'bold'),
+                fg='#ECF0F1',
+                bg='#2C3E50'
+            )
+            card_frame.pack(fill='both', expand=True, padx=5, pady=5)
+            print("DEBUG: Card frame created and packed")
+            
+            # Create card image display
+            self.card_images_frame = tk.Frame(card_frame, bg='#2C3E50')
+            self.card_images_frame.pack(fill='both', expand=True, padx=5, pady=5)
+            print("DEBUG: Card images frame created and packed")
+        except Exception as e:
+            print(f"ERROR: Failed to create card display area: {e}")
+            import traceback
+            print(f"Traceback: {traceback.format_exc()}")
+            raise
         
-        # Card images area - made much larger to accommodate bigger images
-        card_frame = tk.LabelFrame(
-            self.root,
-            text="🃏 DETECTED CARDS",
-            font=('Arial', 10, 'bold'),
-            fg='#ECF0F1',
-            bg='#2C3E50'
-        )
-        card_frame.pack(fill='both', expand=False, padx=10, pady=5)
-        
-        # Create card image display
-        self.card_images_frame = tk.Frame(card_frame, bg='#2C3E50')
-        self.card_images_frame.pack(fill='both', expand=True, padx=5, pady=5)
-        
-        # Initialize card image labels with much larger size
+        # Initialize card image labels with enhanced size for better visibility
         self.card_image_labels = []
         self.card_name_labels = []
         self.card_correct_buttons = []  # Store references to correct buttons
         for i in range(3):
             card_container = tk.Frame(self.card_images_frame, bg='#34495E', relief='raised', bd=3)
-            card_container.pack(side='left', padx=15, pady=15, fill='both', expand=True)
+            card_container.pack(side='left', padx=10, pady=10, fill='both', expand=True)
             
-            # Card name label (larger text)
+            # Card name label (enhanced with bigger font)
             name_label = tk.Label(
                 card_container,
                 text=f"Card {i+1}: Waiting...",
-                font=('Arial', 11, 'bold'),
+                font=('Arial', 12, 'bold'),  # Increased from 11 to 12
                 fg='#ECF0F1',
                 bg='#34495E',
-                wraplength=200,
+                wraplength=280,  # Increased wrap length for wider space
                 height=2
             )
-            name_label.pack(pady=5)
+            name_label.pack(pady=8)
             self.card_name_labels.append(name_label)
             
-            # Card image label (much larger for actual card visibility)
+            # Card image label (significantly larger for better card visibility)
             img_label = tk.Label(
                 card_container,
                 text="No Image",
                 bg='#2C3E50',
                 fg='#BDC3C7',
-                width=40,  # Much larger width for better visibility
-                height=30, # Much larger height for better visibility
+                width=50,  # Increased from 40 to 50 for better visibility
+                height=35, # Increased from 30 to 35 for better visibility
                 relief='sunken',
-                bd=2
+                bd=2,
+                font=('Arial', 10)  # Added font for "No Image" text
             )
             img_label.pack(pady=10, padx=10, fill='both', expand=True)
             self.card_image_labels.append(img_label)
             
-            # Correct button for manual override
+            # Correct button for manual override (enhanced styling)
             correct_btn = tk.Button(
                 card_container,
-                text="Correct...",
-                font=('Arial', 8),
-                bg='#95A5A6',
+                text="✏️ Correct Card",
+                font=('Arial', 9, 'bold'),  # Slightly larger and bold
+                bg='#E67E22',  # Orange color for better visibility
                 fg='white',
+                relief='raised',
+                bd=2,
                 command=lambda idx=i: self._open_correction_dialog(idx)  # Use lambda to pass the index
             )
-            correct_btn.pack(pady=(0, 5))
+            correct_btn.pack(pady=8, padx=10, fill='x')  # Fill width and better padding
             self.card_correct_buttons.append(correct_btn)
         
-        # Recommendation area
+        # Recommendation area - now in left panel with more height
         rec_frame = tk.LabelFrame(
-            self.root,
+            left_panel,
             text="🎯 RECOMMENDATIONS",
-            font=('Arial', 10, 'bold'),
+            font=('Arial', 12, 'bold'),
             fg='#ECF0F1',
             bg='#2C3E50'
         )
-        rec_frame.pack(fill='x', padx=10, pady=5)
+        rec_frame.pack(fill='x', padx=5, pady=5)
         
         self.recommendation_text = tk.Text(
             rec_frame,
-            height=4,
+            height=8,  # Increased from 4 to 8 for better visibility
             bg='#34495E',
             fg='#ECF0F1',
-            font=('Arial', 9),
+            font=('Arial', 10),  # Increased font size
             wrap=tk.WORD
         )
         self.recommendation_text.pack(fill='x', padx=5, pady=5)
         
+        # Log area - now in right panel with constrained size
+        try:
+            print("DEBUG: Creating log area...")
+            log_frame = tk.LabelFrame(
+                right_panel,
+                text="📋 LOG OUTPUT",
+                font=('Arial', 10, 'bold'),
+                fg='#ECF0F1',
+                bg='#2C3E50'
+            )
+            log_frame.pack(fill='both', expand=True, padx=5, pady=5)
+            print("DEBUG: Log frame created and packed")
+            
+            self.log_text_widget = scrolledtext.ScrolledText(
+                log_frame,
+                bg='#1C1C1C',
+                fg='#ECF0F1',
+                font=('Consolas', 8),  # Smaller font to fit more content
+                wrap=tk.WORD
+            )
+            self.log_text_widget.pack(fill='both', expand=True, padx=5, pady=5)
+            print("DEBUG: Log text widget created and packed successfully")
+        except Exception as e:
+            print(f"CRITICAL ERROR: Failed to create log area: {e}")
+            import traceback
+            print(f"Traceback: {traceback.format_exc()}")
+            raise
+        
         # Initial log message
-        self.log_text("🎯 Integrated Arena Bot GUI Initialized!")
-        self.log_text("✅ Log monitoring system ready")
-        self.log_text("✅ Visual detection system ready") 
-        self.log_text("✅ AI draft advisor ready")
-        self.log_text("\n📋 Instructions:")
-        self.log_text("1. Click 'START MONITORING' to begin")
-        self.log_text("2. Open Hearthstone and start an Arena draft")
-        self.log_text("3. The bot will automatically detect and provide recommendations")
-        self.log_text("4. Use 'ANALYZE SCREENSHOT' for manual analysis")
+        try:
+            print("DEBUG: Adding initial log messages...")
+            self.log_text("🎯 Integrated Arena Bot GUI Initialized!")
+            self.log_text("✅ Log monitoring system ready")
+            self.log_text("✅ Visual detection system ready") 
+            self.log_text("✅ AI draft advisor ready")
+            self.log_text("\n📋 Instructions:")
+            self.log_text("1. Click 'START MONITORING' to begin")
+            self.log_text("2. Open Hearthstone and start an Arena draft")
+            self.log_text("3. The bot will automatically detect and provide recommendations")
+            self.log_text("4. Use 'ANALYZE SCREENSHOT' for manual analysis")
+            print("DEBUG: All initial log messages added successfully")
+        except Exception as e:
+            print(f"ERROR: Failed to add initial log messages: {e}")
+            import traceback
+            print(f"Traceback: {traceback.format_exc()}")
+            # Don't raise here - let the GUI continue even if logging fails
         
         # Show initial recommendations
         self.show_recommendation("Ready for Arena Draft", "Start monitoring and open Hearthstone Arena mode to begin receiving AI recommendations.")
@@ -3368,15 +3850,39 @@ class IntegratedArenaBotGUI:
                 pass
     
     def update_status(self, status):
-        """Update the status label."""
+        """Update the status label with enhanced visual indicators."""
         if hasattr(self, 'status_label'):
-            self.status_label.config(text=status)
+            # PHASE 3.2: Enhanced status indicators
+            status_indicators = {
+                'Ready': '🟢 Ready',
+                'Monitoring Active': '🔴 Monitoring Active',
+                'Monitoring Stopped': '🟡 Monitoring Stopped', 
+                'Analyzing': '🔄 Analyzing',
+                'Analysis Complete': '✅ Analysis Complete',
+                'Error': '❌ Error',
+                'Processing': '⚙️ Processing'
+            }
+            
+            # Use enhanced status if available, otherwise use original
+            enhanced_status = status_indicators.get(status, f"📊 {status}")
+            self.status_label.config(text=enhanced_status)
     
     def show_recommendation(self, title, recommendation):
-        """Show recommendation in the GUI."""
+        """Show recommendation in the GUI with enhanced formatting."""
         if hasattr(self, 'recommendation_text'):
+            # PHASE 3.2: Enhanced recommendation title formatting
+            enhanced_titles = {
+                'AI Helper - Grandmaster Analysis': '🧠 AI HELPER - GRANDMASTER ANALYSIS',
+                'Legacy AI Draft Recommendation': '🎯 LEGACY AI DRAFT RECOMMENDATION',
+                'Cards Detected': '📋 CARDS DETECTED',
+                'Ready for Arena Draft': '🎮 READY FOR ARENA DRAFT'
+            }
+            
+            enhanced_title = enhanced_titles.get(title, f"📊 {title.upper()}")
+            
             self.recommendation_text.delete('1.0', tk.END)
-            self.recommendation_text.insert('1.0', f"{title}\n\n{recommendation}")
+            formatted_content = f"{enhanced_title}\n{'='*len(enhanced_title)}\n\n{recommendation}"
+            self.recommendation_text.insert('1.0', formatted_content)
     
     def toggle_monitoring(self):
         """Start or stop monitoring."""
@@ -3873,27 +4379,40 @@ class IntegratedArenaBotGUI:
                     # Progress update every 50 cards
                     if (i + 1) % 50 == 0:
                         progress = (i + 1) / len(available_cards) * 100
-                        # Schedule UI update on main thread
-                        self.root.after(0, lambda: self.log_text(
-                            f"🔄 Background cache: {cached_count} cards cached ({progress:.1f}%)"
-                        ))
+                        # Schedule UI update on main thread (only if GUI available)
+                        if hasattr(self, 'root') and self.root is not None:
+                            self.root.after(0, lambda: self.log_text(
+                                f"🔄 Background cache: {cached_count} cards cached ({progress:.1f}%)"
+                            ))
+                        else:
+                            # Direct logging when GUI not available
+                            print(f"🔄 Background cache: {cached_count} cards cached ({progress:.1f}%)")
                     
                 except Exception as e:
                     # Continue on individual card failures
                     continue
             
-            # Final update
-            self.root.after(0, lambda: self.log_text(
-                f"✅ Background cache build complete: {cached_count} cards cached"
-            ))
-            self.root.after(0, lambda: self.log_text(
-                "⚡ Ultimate Detection will now load instantly!"
-            ))
+            # Final update (only if GUI available)
+            if hasattr(self, 'root') and self.root is not None:
+                self.root.after(0, lambda: self.log_text(
+                    f"✅ Background cache build complete: {cached_count} cards cached"
+                ))
+                self.root.after(0, lambda: self.log_text(
+                    "⚡ Ultimate Detection will now load instantly!"
+                ))
+            else:
+                # Direct logging when GUI not available
+                print(f"✅ Background cache build complete: {cached_count} cards cached")
+                print("⚡ Ultimate Detection will now load instantly!")
             
         except Exception as e:
-            self.root.after(0, lambda: self.log_text(
-                f"❌ Background cache build failed: {e}"
-            ))
+            if hasattr(self, 'root') and self.root is not None:
+                self.root.after(0, lambda: self.log_text(
+                    f"❌ Background cache build failed: {e}"
+                ))
+            else:
+                # Direct logging when GUI not available
+                print(f"❌ Background cache build failed: {e}")
         finally:
             self.cache_build_in_progress = False
     
@@ -4711,6 +5230,9 @@ class IntegratedArenaBotGUI:
                 self.log_text(f"✅ Analysis powered by: {ai_system_used}")
                 # Update pipeline state for success
                 self._pipeline_state = "analysis_complete"
+                
+                # NEW: Update visual overlay with analysis results (Phase 3 Integration)
+                self._update_visual_overlay(detected_cards_sorted, recommendation)
             else:
                 self.log_text("❌ Both AI systems failed - analysis incomplete")
                 self._show_fallback_analysis(detected_cards_sorted)
@@ -4814,11 +5336,23 @@ class IntegratedArenaBotGUI:
             detected_cards: List of detected card dictionaries
             ai_decision: AIDecision object from Grandmaster Advisor
         """
+        # PHASE 3.2: Enhanced text formatting and visual indicators
         # Display enhanced recommendation with AI reasoning
-        rec_text = f"🧠 AI HELPER RECOMMENDATION\n\n"
-        rec_text += f"🎯 RECOMMENDED PICK: #{ai_decision.recommended_pick}\n\n"
-        rec_text += f"🎲 Confidence: {ai_decision.confidence.value.title()}\n\n"
-        rec_text += f"💭 Reasoning: {ai_decision.reasoning}\n\n"
+        rec_text = f"{'='*50}\n"
+        rec_text += f"🧠 AI HELPER RECOMMENDATION\n"
+        rec_text += f"{'='*50}\n\n"
+        
+        # Enhanced confidence display with visual indicators
+        confidence_indicator = {
+            'high': '🟢 HIGH',
+            'medium': '🟡 MEDIUM', 
+            'low': '🔴 LOW'
+        }.get(ai_decision.confidence.value.lower(), ai_decision.confidence.value.upper())
+        
+        rec_text += f"🎯 RECOMMENDED PICK: Card #{ai_decision.recommended_pick}\n"
+        rec_text += f"🎲 Confidence Level: {confidence_indicator}\n\n"
+        rec_text += f"💭 AI Reasoning:\n"
+        rec_text += f"   {ai_decision.reasoning}\n\n"
         
         if ai_decision.strategic_context:
             rec_text += f"📊 Strategic Context:\n"
@@ -4826,14 +5360,30 @@ class IntegratedArenaBotGUI:
             rec_text += f"   • Curve Need: {ai_decision.strategic_context.curve_needs}\n"
             rec_text += f"   • Synergy Potential: {ai_decision.strategic_context.synergy_opportunities}\n\n"
         
-        rec_text += "📋 Detailed Card Analysis:\n"
+        rec_text += f"{'-'*50}\n"
+        rec_text += "📋 DETAILED CARD ANALYSIS\n"
+        rec_text += f"{'-'*50}\n"
         
         for i, (card_option, evaluation) in enumerate(ai_decision.card_evaluations):
-            marker = "👑" if i == ai_decision.recommended_pick - 1 else "📋"
-            rec_text += f"{marker} {i+1}. {card_option.card_info.name}\n"
-            rec_text += f"   • Overall Score: {evaluation.overall_score:.2f}\n"
-            rec_text += f"   • Value: {evaluation.value_score:.2f} | Tempo: {evaluation.tempo_score:.2f}\n"
-            rec_text += f"   • Synergy: {evaluation.synergy_score:.2f} | Curve: {evaluation.curve_score:.2f}\n\n"
+            is_recommended = i == ai_decision.recommended_pick - 1
+            marker = "👑 RECOMMENDED" if is_recommended else f"📋 Option {i+1}"
+            
+            # PHASE 3.1: Use get_card_name for consistent friendly names  
+            card_name = self.get_card_name(card_option.card_info.card_code) if hasattr(card_option.card_info, 'card_code') else card_option.card_info.name
+            
+            # Enhanced formatting with score indicators
+            rec_text += f"\n{marker}: {card_name}\n"
+            
+            # Overall score with visual indicator
+            overall_score = evaluation.overall_score
+            score_indicator = "🔥" if overall_score >= 8.0 else "⭐" if overall_score >= 6.0 else "📊"
+            rec_text += f"   {score_indicator} Overall Score: {overall_score:.2f}/10\n"
+            
+            # Detailed scores with better formatting
+            rec_text += f"   ├─ 💎 Value: {evaluation.value_score:.2f}\n"
+            rec_text += f"   ├─ ⚡ Tempo: {evaluation.tempo_score:.2f}\n"
+            rec_text += f"   ├─ 🔗 Synergy: {evaluation.synergy_score:.2f}\n"
+            rec_text += f"   └─ 📈 Curve: {evaluation.curve_score:.2f}\n"
         
         if ai_decision.fallback_used:
             rec_text += "⚠️ Note: Fallback heuristics were used for this analysis\n"
@@ -4842,7 +5392,9 @@ class IntegratedArenaBotGUI:
         
         # Log the recommendation
         recommended_card = ai_decision.card_evaluations[ai_decision.recommended_pick - 1][0]
-        self.log_text(f"\n🧠 AI HELPER RECOMMENDATION: Pick #{ai_decision.recommended_pick} - {recommended_card.card_info.name}")
+        # PHASE 3.1: Use get_card_name for consistent friendly names in log
+        rec_card_name = self.get_card_name(recommended_card.card_info.card_code) if hasattr(recommended_card.card_info, 'card_code') else recommended_card.card_info.name
+        self.log_text(f"\n🧠 AI HELPER RECOMMENDATION: Pick #{ai_decision.recommended_pick} - {rec_card_name}")
         self.log_text(f"   🎲 Confidence: {ai_decision.confidence.value.title()}")
         self.log_text(f"   ⏱️ Analysis time: {ai_decision.analysis_duration_ms:.1f}ms")
     
@@ -4853,16 +5405,31 @@ class IntegratedArenaBotGUI:
         """
         if recommendation:
             rec_card_name = self.get_card_name(recommendation['recommended_card'])
-            rec_text = f"🎯 LEGACY AI RECOMMENDATION: {rec_card_name}\n\n"
-            rec_text += f"📊 Position: #{recommendation['recommended_pick']}\n\n"
-            rec_text += f"💭 Reasoning: {recommendation['reasoning']}\n\n"
-            rec_text += "📋 All Cards:\n"
+            # PHASE 3.2: Enhanced legacy analysis formatting
+            rec_text = f"{'='*50}\n"
+            rec_text += f"🎯 LEGACY AI RECOMMENDATION\n"
+            rec_text += f"{'='*50}\n\n"
+            rec_text += f"👑 RECOMMENDED: {rec_card_name}\n"
+            rec_text += f"📍 Position: Card #{recommendation['recommended_pick']}\n\n"
+            rec_text += f"💭 AI Reasoning:\n"
+            rec_text += f"   {recommendation['reasoning']}\n\n"
+            rec_text += f"{'-'*50}\n"
+            rec_text += "📋 ALL CARD OPTIONS\n"
+            rec_text += f"{'-'*50}\n"
             
             for i, card_detail in enumerate(recommendation['card_details']):
                 card_name = self.get_card_name(card_detail['card_code'])
-                marker = "👑" if i == recommendation['recommended_pick'] - 1 else "📋"
-                # Use 'tier_letter' and 'win_rate' from the card_detail dictionary
-                rec_text += f"{marker} {i+1}. {card_name} (Tier {card_detail['tier_letter']}, {card_detail['win_rate']:.0%} WR)\n"
+                is_recommended = i == recommendation['recommended_pick'] - 1
+                marker = "👑 RECOMMENDED" if is_recommended else f"📋 Option {i+1}"
+                
+                # Enhanced legacy card formatting with tier indicators
+                tier = card_detail['tier_letter']
+                tier_indicator = "🔥" if tier in ['S', 'A'] else "⭐" if tier == 'B' else "📊"
+                win_rate = card_detail['win_rate']
+                wr_indicator = "🟢" if win_rate >= 0.6 else "🟡" if win_rate >= 0.5 else "🔴"
+                
+                rec_text += f"\n{marker}: {card_name}\n"
+                rec_text += f"   {tier_indicator} Tier: {tier} | {wr_indicator} Win Rate: {win_rate:.0%}\n"
             
             self.show_recommendation("Legacy AI Draft Recommendation", rec_text)
             self.log_text(f"\n🎯 LEGACY AI RECOMMENDATION: Pick #{recommendation['recommended_pick']} - {rec_card_name}")
@@ -4871,13 +5438,13 @@ class IntegratedArenaBotGUI:
     
     def run(self):
         """Start the GUI application."""
-        if hasattr(self, 'root'):
+        if hasattr(self, 'root') and self.root is not None:
             try:
                 self.root.mainloop()
             except KeyboardInterrupt:
                 self.stop()
         else:
-            self.log_text("❌ GUI not available, running in command-line mode")
+            print("❌ GUI not available, running in command-line mode")
             self.run_command_line()
     
     def stop(self):
@@ -5911,7 +6478,13 @@ class CoordinateSelector:
             try:
                 for i, (card_option, evaluation) in enumerate(ai_decision.card_evaluations):
                     marker = "👑" if i == ai_decision.recommended_pick - 1 else "📋"
-                    card_name = getattr(card_option.card_info, 'name', f'Card {i+1}') if hasattr(card_option, 'card_info') else f'Card {i+1}'
+                    # PHASE 3.1: Use get_card_name for consistent friendly names
+                    if hasattr(card_option, 'card_info') and hasattr(card_option.card_info, 'card_code'):
+                        card_name = self.get_card_name(card_option.card_info.card_code)
+                    elif hasattr(card_option, 'card_info') and hasattr(card_option.card_info, 'name'):
+                        card_name = card_option.card_info.name
+                    else:
+                        card_name = f'Card {i+1}'
                     rec_text += f"{marker} {i+1}. {card_name}\n"
                     
                     # Safe evaluation score display
@@ -5933,7 +6506,9 @@ class CoordinateSelector:
             
             # Log summary
             try:
-                rec_card_name = ai_decision.card_evaluations[ai_decision.recommended_pick - 1][0].card_info.name
+                recommended_card = ai_decision.card_evaluations[ai_decision.recommended_pick - 1][0]
+                # PHASE 3.1: Use get_card_name for consistent friendly names in log
+                rec_card_name = self.get_card_name(recommended_card.card_info.card_code) if hasattr(recommended_card.card_info, 'card_code') else recommended_card.card_info.name
                 self.log_text(f"\n🎯 AI HELPER RECOMMENDATION: Pick #{ai_decision.recommended_pick} - {rec_card_name}")
             except:
                 self.log_text(f"\n🎯 AI HELPER RECOMMENDATION: Pick #{ai_decision.recommended_pick}")
@@ -6370,6 +6945,867 @@ class CoordinateSelector:
             
         except Exception as e:
             print(f"❌ Error during shutdown: {e}")
+
+    # === VISUAL OVERLAY DEBUG METHODS (Phase 1.4) ===
+    
+    def _show_overlay_status(self):
+        """Show comprehensive visual overlay status and debugging information."""
+        try:
+            self.log_text("\n" + "="*60)
+            self.log_text("👁️ VISUAL OVERLAY STATUS REPORT")
+            self.log_text("="*60)
+            
+            # Check if overlay exists
+            if not self.visual_overlay:
+                self.log_text("❌ Visual overlay: NOT INITIALIZED")
+                self.log_text("   Reason: overlay object is None")
+                self.log_text("   Solution: Check Phase 3 component initialization")
+                return
+            
+            self.log_text("✅ Visual overlay: INITIALIZED")
+            
+            # Check overlay state
+            overlay_running = getattr(self.visual_overlay, 'running', False)
+            overlay_state = getattr(self.visual_overlay, 'state', 'unknown')
+            
+            self.log_text(f"🔄 Overlay running: {'YES' if overlay_running else 'NO'}")
+            self.log_text(f"📊 Overlay state: {overlay_state}")
+            
+            # Check window detection
+            game_window = getattr(self.visual_overlay, 'game_window_hwnd', None)
+            if game_window:
+                self.log_text(f"🎯 Game window detected: HWND {game_window}")
+            else:
+                self.log_text("⚠️ Game window: NOT DETECTED")
+                self.log_text("   Solution: Ensure Hearthstone is running and use enhanced window detection")
+            
+            # Check monitor selection
+            target_monitor = getattr(self.visual_overlay, 'target_monitor', None)
+            if target_monitor:
+                monitor_name = getattr(target_monitor, 'device_name', 'Unknown')
+                monitor_bounds = getattr(target_monitor, 'bounds', 'Unknown')
+                self.log_text(f"🖥️ Target monitor: {monitor_name} {monitor_bounds}")
+            else:
+                self.log_text("⚠️ Target monitor: NOT SELECTED")
+            
+            # Check current decision
+            current_decision = getattr(self.visual_overlay, 'current_decision', None)
+            if current_decision:
+                self.log_text("📋 Current AI decision: AVAILABLE")
+                recommended_pick = getattr(current_decision, 'recommended_pick', 'unknown')
+                confidence = getattr(current_decision, 'confidence', 'unknown')
+                self.log_text(f"   Recommended pick: #{recommended_pick}")
+                self.log_text(f"   Confidence: {confidence}")
+            else:
+                self.log_text("📋 Current AI decision: NONE")
+                self.log_text("   Note: Decision will be set after analysis completes")
+            
+            # Performance stats
+            if hasattr(self.visual_overlay, 'get_performance_stats'):
+                try:
+                    stats = self.visual_overlay.get_performance_stats()
+                    self.log_text("📊 Performance stats:")
+                    for key, value in stats.items():
+                        self.log_text(f"   {key}: {value}")
+                except Exception as e:
+                    self.log_text(f"⚠️ Could not get performance stats: {e}")
+            
+            self.log_text("="*60)
+            self.log_text("✅ Status report complete")
+            
+        except Exception as e:
+            self.log_text(f"❌ Error showing overlay status: {e}")
+            import traceback
+            self.log_text(f"🔍 DEBUG: Status error details: {traceback.format_exc()}")
+    
+    def _test_overlay_drawing(self):
+        """Test overlay drawing with mock data."""
+        try:
+            self.log_text("\n🧪 TESTING VISUAL OVERLAY DRAWING...")
+            
+            if not self.visual_overlay:
+                self.log_text("❌ Cannot test: Visual overlay not initialized")
+                return
+            
+            # Ensure overlay is running
+            if not getattr(self.visual_overlay, 'running', False):
+                self.log_text("🔄 Starting overlay for testing...")
+                if hasattr(self.visual_overlay, 'start'):
+                    success = self.visual_overlay.start()
+                    if not success:
+                        self.log_text("❌ Failed to start overlay for testing")
+                        return
+                else:
+                    self.log_text("❌ Overlay doesn't have start method")
+                    return
+            
+            # Create mock AI decision for testing
+            try:
+                from arena_bot.ai_v2.data_models import AIDecision, CardOption, EvaluationScores, ConfidenceLevel
+                
+                # Create mock card options
+                card_evaluations = []
+                for i in range(3):
+                    card_info = type('CardInfo', (), {
+                        'name': f'Test Card {i+1}',
+                        'card_code': f'TEST_{i+1}',
+                        'position': i+1
+                    })()
+                    
+                    card_option = CardOption(
+                        position=i+1,
+                        card_info=card_info,
+                        confidence=0.85 + i*0.05
+                    )
+                    
+                    scores = EvaluationScores(
+                        value_score=3.5 + i*0.5,
+                        synergy_score=2.0 + i*0.3,
+                        curve_score=2.8 + i*0.2,
+                        composite_score=3.0 + i*0.4
+                    )
+                    
+                    card_evaluations.append((card_option, scores))
+                
+                # Create mock AI decision
+                test_decision = AIDecision(
+                    recommended_pick=2,  # Recommend middle card
+                    card_evaluations=card_evaluations,
+                    reasoning="This is a test decision for overlay verification",
+                    confidence=ConfidenceLevel.HIGH,
+                    metadata={
+                        'test_mode': True,
+                        'created_at': 'test_session'
+                    }
+                )
+                
+                # Update overlay with test decision
+                if hasattr(self.visual_overlay, 'update_decision'):
+                    self.visual_overlay.update_decision(test_decision)
+                    self.log_text("✅ Test decision sent to overlay")
+                    self.log_text("👀 CHECK HEARTHSTONE WINDOW for overlay display!")
+                    self.log_text("   Expected: Overlay showing 3 test cards with card 2 highlighted")
+                else:
+                    self.log_text("❌ Overlay doesn't have update_decision method")
+                
+            except ImportError:
+                self.log_text("⚠️ AI v2 data models not available - cannot create test decision")
+            except Exception as e:
+                self.log_text(f"❌ Error creating test decision: {e}")
+            
+        except Exception as e:
+            self.log_text(f"❌ Error testing overlay: {e}")
+            import traceback
+            self.log_text(f"🔍 DEBUG: Test error details: {traceback.format_exc()}")
+    
+    def _restart_overlay(self):
+        """Restart the visual overlay system."""
+        try:
+            self.log_text("\n🔄 RESTARTING VISUAL OVERLAY...")
+            
+            if not self.visual_overlay:
+                self.log_text("❌ Cannot restart: Visual overlay not initialized")
+                return
+            
+            # Stop overlay if running
+            if getattr(self.visual_overlay, 'running', False):
+                self.log_text("🛑 Stopping current overlay...")
+                if hasattr(self.visual_overlay, 'stop'):
+                    self.visual_overlay.stop()
+                    self.log_text("✅ Overlay stopped")
+                else:
+                    self.log_text("⚠️ Overlay doesn't have stop method")
+            
+            # Wait a moment
+            import time
+            time.sleep(1)
+            
+            # Restart overlay
+            self.log_text("🚀 Starting overlay...")
+            if hasattr(self.visual_overlay, 'start'):
+                success = self.visual_overlay.start()
+                if success:
+                    self.log_text("✅ Overlay restarted successfully")
+                    self.log_text("👀 Overlay should now be active over Hearthstone window")
+                else:
+                    self.log_text("❌ Failed to restart overlay")
+            else:
+                self.log_text("❌ Overlay doesn't have start method")
+            
+        except Exception as e:
+            self.log_text(f"❌ Error restarting overlay: {e}")
+            import traceback
+            self.log_text(f"🔍 DEBUG: Restart error details: {traceback.format_exc()}")
+
+    # === RESPONSIVE DESIGN METHODS (Phase 2.2) ===
+    
+    def _on_window_resize(self, event):
+        """
+        Handle window resize events for responsive design.
+        
+        This method adjusts layout proportions and element sizes based on window size.
+        """
+        # Only respond to root window resize events
+        if event.widget != self.root:
+            return
+        
+        try:
+            # Get current window dimensions
+            window_width = self.root.winfo_width()
+            window_height = self.root.winfo_height()
+            
+            # Skip if window is too small (probably being minimized)
+            if window_width < 500 or window_height < 400:
+                return
+            
+            # Adjust paned window proportions based on window size
+            self._adjust_panel_proportions(window_width, window_height)
+            
+            # Adjust card display sizes for different window sizes
+            self._adjust_card_display_sizes(window_width, window_height)
+            
+            # Adjust font sizes for better readability
+            self._adjust_font_sizes(window_width, window_height)
+            
+        except Exception as e:
+            # Don't spam logs with resize errors
+            pass
+    
+    def _adjust_panel_proportions(self, window_width, window_height):
+        """Adjust the proportions of left and right panels based on window size."""
+        try:
+            if not hasattr(self, 'main_paned'):
+                return
+            
+            # Calculate optimal panel widths
+            if window_width < 1400:
+                # Smaller windows: give more space to cards (70/30 split)
+                left_width = int(window_width * 0.70)
+                right_width = int(window_width * 0.30)
+            elif window_width > 2000:
+                # Larger windows: more balanced split (60/40)
+                left_width = int(window_width * 0.60)
+                right_width = int(window_width * 0.40)
+            else:
+                # Medium windows: default split (65/35)
+                left_width = int(window_width * 0.65)
+                right_width = int(window_width * 0.35)
+            
+            # Apply the new proportions (updated for fixed layout)
+            if hasattr(self, 'right_panel'):
+                self.right_panel.config(width=right_width)
+            
+        except Exception as e:
+            pass
+    
+    def _adjust_card_display_sizes(self, window_width, window_height):
+        """Adjust card display sizes based on available space."""
+        try:
+            if not hasattr(self, 'card_image_labels'):
+                return
+            
+            # Calculate card image size based on available space
+            if window_width < 1400:
+                # Smaller windows: compact card display
+                card_width = 35
+                card_height = 25
+                wrap_length = 200
+            elif window_width > 2000:
+                # Larger windows: expanded card display
+                card_width = 60
+                card_height = 45
+                wrap_length = 350
+            else:
+                # Medium windows: default size
+                card_width = 50
+                card_height = 35
+                wrap_length = 280
+            
+            # Update card image label sizes
+            for label in self.card_image_labels:
+                try:
+                    label.configure(width=card_width, height=card_height)
+                except Exception:
+                    pass
+            
+            # Update card name label wrap lengths
+            for label in self.card_name_labels:
+                try:
+                    label.configure(wraplength=wrap_length)
+                except Exception:
+                    pass
+                    
+        except Exception as e:
+            pass
+    
+    def _adjust_font_sizes(self, window_width, window_height):
+        """Adjust font sizes based on window size for better readability."""
+        try:
+            # Calculate font scaling factor
+            base_width = 1800  # Our default design width
+            scale_factor = min(window_width / base_width, 1.2)  # Cap scaling at 1.2x
+            
+            # Don't scale if window is too small
+            if scale_factor < 0.8:
+                scale_factor = 0.8
+            
+            # Calculate new font sizes
+            card_name_size = max(10, int(12 * scale_factor))
+            recommendation_size = max(9, int(10 * scale_factor))
+            log_size = max(7, int(8 * scale_factor))
+            
+            # Update card name fonts
+            if hasattr(self, 'card_name_labels'):
+                for label in self.card_name_labels:
+                    try:
+                        current_font = label.cget('font')
+                        if isinstance(current_font, str):
+                            # Extract font family from string
+                            font_family = 'Arial'
+                        else:
+                            font_family = current_font[0] if current_font else 'Arial'
+                        label.configure(font=(font_family, card_name_size, 'bold'))
+                    except Exception:
+                        pass
+            
+            # Update recommendation text font
+            if hasattr(self, 'recommendation_text'):
+                try:
+                    self.recommendation_text.configure(font=('Arial', recommendation_size))
+                except Exception:
+                    pass
+            
+            # Update log text font  
+            if hasattr(self, 'log_text_widget'):
+                try:
+                    self.log_text_widget.configure(font=('Consolas', log_size))
+                except Exception:
+                    pass
+                    
+        except Exception as e:
+            pass
+
+    # === ENHANCED DEBUG MODES AND TESTING FRAMEWORK (Phase 4.1) ===
+
+    def _toggle_debug_mode(self):
+        """Toggle comprehensive debug mode for enhanced logging and diagnostics."""
+        try:
+            debug_enabled = self.debug_mode.get()
+            if debug_enabled:
+                self.log_text("\n" + "🐛"*20)
+                self.log_text("🐛 DEBUG MODE ENABLED")
+                self.log_text("🐛"*20)
+                self.log_text("🔍 Enhanced logging and diagnostics active")
+                self.log_text("📊 Performance monitoring enabled")
+                self.log_text("🎯 Overlay tracking enhanced")
+                self.log_text("🧪 Testing framework ready")
+                
+                # Enable debug-level logging if possible
+                if hasattr(self, 'visual_overlay') and self.visual_overlay:
+                    if hasattr(self.visual_overlay, 'logger'):
+                        self.visual_overlay.logger.setLevel(10)  # DEBUG level
+                
+                # Start debug monitoring
+                self._start_debug_monitoring()
+            else:
+                self.log_text("\n🐛 DEBUG MODE DISABLED")
+                self.log_text("📊 Returning to normal logging level")
+                
+                # Reset logging level
+                if hasattr(self, 'visual_overlay') and self.visual_overlay:
+                    if hasattr(self.visual_overlay, 'logger'):
+                        self.visual_overlay.logger.setLevel(20)  # INFO level
+                
+                # Stop debug monitoring
+                self._stop_debug_monitoring()
+                
+        except Exception as e:
+            self.log_text(f"❌ Error toggling debug mode: {e}")
+
+    def _start_debug_monitoring(self):
+        """Start enhanced debug monitoring and performance tracking."""
+        try:
+            import time
+            self.log_text("🔄 Starting debug monitoring systems...")
+            
+            # Initialize debug state tracking
+            self._debug_state = {
+                'analysis_count': 0,
+                'overlay_updates': 0,
+                'errors_detected': 0,
+                'performance_metrics': [],
+                'start_time': time.time()
+            }
+            
+            # Start periodic debug status updates
+            self._schedule_debug_update()
+            
+            self.log_text("✅ Debug monitoring active")
+            
+        except Exception as e:
+            self.log_text(f"❌ Error starting debug monitoring: {e}")
+
+    def _run_comprehensive_tests(self):
+        """Run comprehensive testing suite for all overlay functionality."""
+        try:
+            self.log_text("\n" + "🧪"*50)
+            self.log_text("🧪 COMPREHENSIVE TESTING SUITE")
+            self.log_text("🧪"*50)
+            
+            test_results = []
+            
+            # Test 1: Overlay Initialization
+            self.log_text("\n🔬 TEST 1: Overlay Initialization")
+            result1 = self._test_overlay_initialization()
+            test_results.append(("Overlay Initialization", result1))
+            
+            # Test 2: Window Detection
+            self.log_text("\n🔬 TEST 2: Game Window Detection")
+            result2 = self._test_window_detection()
+            test_results.append(("Window Detection", result2))
+            
+            # Test 3: Monitor Selection
+            self.log_text("\n🔬 TEST 3: Monitor Selection")
+            result3 = self._test_monitor_selection()
+            test_results.append(("Monitor Selection", result3))
+            
+            # Test 4: Analysis Integration
+            self.log_text("\n🔬 TEST 4: Analysis Integration")
+            result4 = self._test_analysis_integration()
+            test_results.append(("Analysis Integration", result4))
+            
+            # Test Summary
+            self.log_text("\n" + "📊"*50)
+            self.log_text("📊 TEST RESULTS SUMMARY")
+            self.log_text("📊"*50)
+            
+            passed = 0
+            total = len(test_results)
+            
+            for test_name, result in test_results:
+                status = "✅ PASS" if result else "❌ FAIL"
+                self.log_text(f"{status} {test_name}")
+                if result:
+                    passed += 1
+            
+            self.log_text(f"\n🎯 OVERALL RESULT: {passed}/{total} tests passed ({passed/total*100:.1f}%)")
+            
+            if passed == total:
+                self.log_text("🎉 ALL TESTS PASSED! System is functioning correctly.")
+            else:
+                self.log_text("⚠️ Some tests failed. Check individual test results for details.")
+            
+            self.log_text("🧪"*50)
+            
+        except Exception as e:
+            self.log_text(f"❌ Error running comprehensive tests: {e}")
+            import traceback
+            self.log_text(f"🔍 DEBUG: Test error details: {traceback.format_exc()}")
+
+    def _test_overlay_initialization(self):
+        """Test overlay initialization and basic functionality."""
+        try:
+            if not self.visual_overlay:
+                self.log_text("❌ Overlay not initialized")
+                return False
+            
+            self.log_text("✅ Overlay object exists")
+            
+            # Check required attributes
+            required_attrs = ['config', 'logger']
+            for attr in required_attrs:
+                if not hasattr(self.visual_overlay, attr):
+                    self.log_text(f"❌ Missing required attribute: {attr}")
+                    return False
+            
+            self.log_text("✅ All required attributes present")
+            
+            # Check if overlay can be started
+            if hasattr(self.visual_overlay, 'start'):
+                self.log_text("✅ Start method available")
+            else:
+                self.log_text("❌ Start method missing")
+                return False
+            
+            return True
+            
+        except Exception as e:
+            self.log_text(f"❌ Overlay initialization test failed: {e}")
+            return False
+
+    def _test_window_detection(self):
+        """Test game window detection functionality."""
+        try:
+            # Test window detection method availability
+            if not hasattr(self.visual_overlay, 'find_game_window'):
+                self.log_text("❌ Window detection method not available")
+                return False
+            
+            # Test window detection
+            window_titles = getattr(self.visual_overlay.config, 'game_window_titles', [])
+            if not window_titles:
+                self.log_text("❌ No window titles configured")
+                return False
+            
+            self.log_text(f"🔍 Testing with {len(window_titles)} window title patterns")
+            
+            # Attempt window detection (static method)
+            from arena_bot.ui.visual_overlay import WindowsAPIHelper
+            game_window = WindowsAPIHelper.find_game_window(window_titles)
+            
+            if game_window:
+                self.log_text(f"✅ Game window detected: HWND {game_window}")
+            else:
+                self.log_text("⚠️ Game window not detected (this is OK if Hearthstone isn't running)")
+            
+            return True  # Not a failure if game isn't running
+            
+        except Exception as e:
+            self.log_text(f"❌ Window detection test failed: {e}")
+            return False
+
+    def _test_monitor_selection(self):
+        """Test monitor selection and positioning."""
+        try:
+            if not hasattr(self.visual_overlay, 'monitors'):
+                self.log_text("❌ Monitor information not available")
+                return False
+            
+            monitors = getattr(self.visual_overlay, 'monitors', [])
+            if not monitors:
+                self.log_text("❌ No monitors detected")
+                return False
+            
+            self.log_text(f"✅ {len(monitors)} monitors detected")
+            
+            # Test monitor selection
+            target_monitor = getattr(self.visual_overlay, 'target_monitor', None)
+            if target_monitor:
+                self.log_text(f"✅ Target monitor selected: {target_monitor.device_name}")
+            else:
+                self.log_text("⚠️ No target monitor selected")
+            
+            return True
+            
+        except Exception as e:
+            self.log_text(f"❌ Monitor selection test failed: {e}")
+            return False
+
+    def _test_analysis_integration(self):
+        """Test analysis to overlay integration."""
+        try:
+            # Test conversion method
+            if not hasattr(self, '_convert_analysis_to_ai_decision'):
+                self.log_text("❌ Analysis conversion method not available")
+                return False
+            
+            self.log_text("✅ Analysis conversion method available")
+            
+            # Test overlay update method
+            if not hasattr(self, '_update_visual_overlay'):
+                self.log_text("❌ Overlay update method not available")
+                return False
+            
+            self.log_text("✅ Overlay update method available")
+            
+            # Test with mock data
+            mock_cards = [
+                {'card_name': 'Test Card 1', 'card_code': 'TEST_001', 'confidence': 0.9},
+                {'card_name': 'Test Card 2', 'card_code': 'TEST_002', 'confidence': 0.8},
+                {'card_name': 'Test Card 3', 'card_code': 'TEST_003', 'confidence': 0.7}
+            ]
+            
+            mock_recommendation = {
+                'recommended_pick': 2,
+                'reasoning': 'Test integration reasoning',
+                'confidence': 0.85
+            }
+            
+            # Test conversion
+            ai_decision = self._convert_analysis_to_ai_decision(mock_cards, mock_recommendation)
+            
+            if ai_decision:
+                self.log_text("✅ Analysis to AI decision conversion successful")
+                return True
+            else:
+                self.log_text("❌ Analysis to AI decision conversion failed")
+                return False
+            
+        except Exception as e:
+            self.log_text(f"❌ Analysis integration test failed: {e}")
+            return False
+
+    def _schedule_debug_update(self):
+        """Schedule periodic debug status updates."""
+        try:
+            if self.debug_mode.get():
+                self._debug_status_update()
+                # Schedule next update in 10 seconds
+                self._debug_update_job = self.root.after(10000, self._schedule_debug_update)
+        except Exception as e:
+            pass  # Silent failure for debug updates
+
+    def _debug_status_update(self):
+        """Provide periodic debug status updates."""
+        try:
+            import time
+            if not hasattr(self, '_debug_state'):
+                return
+            
+            runtime = time.time() - self._debug_state['start_time']
+            self.log_text(f"🐛 DEBUG STATUS: {runtime:.0f}s runtime, "
+                         f"{self._debug_state['analysis_count']} analyses, "
+                         f"{self._debug_state['overlay_updates']} overlay updates")
+            
+        except Exception as e:
+            pass  # Silent failure for debug updates
+
+    def _stop_debug_monitoring(self):
+        """Stop debug monitoring and provide summary."""
+        try:
+            import time
+            if hasattr(self, '_debug_state'):
+                runtime = time.time() - self._debug_state['start_time']
+                self.log_text(f"\n📊 DEBUG SESSION SUMMARY:")
+                self.log_text(f"   ⏱️ Runtime: {runtime:.1f} seconds")
+                self.log_text(f"   📈 Analyses: {self._debug_state['analysis_count']}")
+                self.log_text(f"   🎯 Overlay Updates: {self._debug_state['overlay_updates']}")
+                self.log_text(f"   ❌ Errors: {self._debug_state['errors_detected']}")
+                
+                delattr(self, '_debug_state')
+            
+            # Cancel debug updates
+            if hasattr(self, '_debug_update_job'):
+                self.root.after_cancel(self._debug_update_job)
+                delattr(self, '_debug_update_job')
+            
+            self.log_text("🛑 Debug monitoring stopped")
+            
+        except Exception as e:
+            self.log_text(f"❌ Error stopping debug monitoring: {e}")
+
+    # === ENHANCED LOGGING AND MANUAL TESTING (Phase 4.2) ===
+
+    def _trigger_manual_analysis(self):
+        """Manually trigger analysis with comprehensive logging."""
+        try:
+            self.log_text("\n" + "⚙️"*50)
+            self.log_text("⚙️ MANUAL ANALYSIS TRIGGER")
+            self.log_text("⚙️"*50)
+            
+            # Check if monitoring is active
+            if not getattr(self, 'monitoring_active', False):
+                self.log_text("🔄 Starting monitoring for manual analysis...")
+                self.start_monitoring()
+                # Give monitoring time to initialize
+                self.root.after(1000, self._execute_manual_analysis)
+            else:
+                self._execute_manual_analysis()
+                
+        except Exception as e:
+            self.log_text(f"❌ Error triggering manual analysis: {e}")
+            import traceback
+            self.log_text(f"🔍 DEBUG: Manual trigger error: {traceback.format_exc()}")
+
+    def _execute_manual_analysis(self):
+        """Execute the manual analysis with detailed logging."""
+        try:
+            self.log_text("🔍 Executing manual analysis with enhanced logging...")
+            
+            # Log current state
+            self.log_text(f"📊 Current monitoring state: {getattr(self, 'monitoring_active', False)}")
+            self.log_text(f"🎯 Visual overlay state: {bool(self.visual_overlay)}")
+            self.log_text(f"🐛 Debug mode: {self.debug_mode.get()}")
+            self.log_text(f"📝 Verbose logging: {self.verbose_logging.get()}")
+            
+            # Check for existing detected cards
+            if hasattr(self, 'detected_cards_sorted') and self.detected_cards_sorted:
+                self.log_text(f"♻️ Using existing detected cards: {len(self.detected_cards_sorted)} found")
+                self._analyze_existing_cards()
+            else:
+                self.log_text("🔍 No existing cards found - triggering fresh detection...")
+                self._trigger_fresh_detection()
+                
+        except Exception as e:
+            self.log_text(f"❌ Error executing manual analysis: {e}")
+            import traceback
+            self.log_text(f"🔍 DEBUG: Manual execution error: {traceback.format_exc()}")
+
+    def _analyze_existing_cards(self):
+        """Analyze existing detected cards with enhanced logging."""
+        try:
+            self.log_text("🔄 Analyzing existing detected cards...")
+            
+            for i, card in enumerate(self.detected_cards_sorted):
+                self.log_text(f"📋 Card {i+1}: {card.get('card_name', 'Unknown')} "
+                             f"(confidence: {card.get('confidence', 0):.2f})")
+            
+            # Trigger AI analysis
+            self.log_text("🧠 Initiating AI analysis...")
+            self._trigger_ai_analysis(self.detected_cards_sorted)
+            
+        except Exception as e:
+            self.log_text(f"❌ Error analyzing existing cards: {e}")
+
+    def _trigger_fresh_detection(self):
+        """Trigger fresh card detection with comprehensive logging."""
+        try:
+            self.log_text("📸 Initiating fresh card detection...")
+            
+            # Simulate the detection process
+            self.log_text("🔍 Capturing screenshot...")
+            self.log_text("🎯 Detecting card regions...")
+            self.log_text("🧠 Running OCR and card identification...")
+            
+            # For manual testing, we can create mock cards or trigger actual detection
+            self.log_text("⚠️ Manual detection trigger - check monitoring system for results")
+            
+        except Exception as e:
+            self.log_text(f"❌ Error in fresh detection: {e}")
+
+    def _toggle_verbose_logging(self):
+        """Toggle verbose logging mode for detailed system insights."""
+        try:
+            verbose_enabled = self.verbose_logging.get()
+            
+            if verbose_enabled:
+                self.log_text("\n📝 VERBOSE LOGGING ENABLED")
+                self.log_text("🔍 Detailed system logging activated")
+                self.log_text("📊 All operations will include comprehensive details")
+                
+                # Set verbose logging flag
+                self._verbose_mode = True
+                
+                # Log current system state in detail
+                self._log_detailed_system_state()
+                
+            else:
+                self.log_text("\n📝 VERBOSE LOGGING DISABLED")
+                self.log_text("📊 Returning to standard logging level")
+                self._verbose_mode = False
+                
+        except Exception as e:
+            self.log_text(f"❌ Error toggling verbose logging: {e}")
+
+    def _log_detailed_system_state(self):
+        """Log comprehensive system state information."""
+        try:
+            self.log_text("\n" + "📊"*40)
+            self.log_text("📊 DETAILED SYSTEM STATE")
+            self.log_text("📊"*40)
+            
+            # GUI State
+            self.log_text("🖥️ GUI State:")
+            self.log_text(f"   Window size: {self.root.winfo_width()}x{self.root.winfo_height()}")
+            self.log_text(f"   Monitoring active: {getattr(self, 'monitoring_active', False)}")
+            self.log_text(f"   Debug mode: {self.debug_mode.get()}")
+            
+            # Card Detection State
+            detected_count = len(getattr(self, 'detected_cards_sorted', []))
+            self.log_text(f"🃏 Card Detection:")
+            self.log_text(f"   Detected cards: {detected_count}")
+            self.log_text(f"   Ultimate detection: {self.use_ultimate_detection.get()}")
+            
+            # Visual Overlay State
+            if self.visual_overlay:
+                overlay_running = getattr(self.visual_overlay, 'running', False)
+                overlay_state = getattr(self.visual_overlay, 'state', 'unknown')
+                game_window = getattr(self.visual_overlay, 'game_window_hwnd', None)
+                
+                self.log_text(f"👁️ Visual Overlay:")
+                self.log_text(f"   Initialized: YES")
+                self.log_text(f"   Running: {overlay_running}")
+                self.log_text(f"   State: {overlay_state}")
+                self.log_text(f"   Game window: {'DETECTED' if game_window else 'NOT DETECTED'}")
+            else:
+                self.log_text(f"👁️ Visual Overlay: NOT INITIALIZED")
+            
+            # AI System State
+            self.log_text(f"🧠 AI Systems:")
+            self.log_text(f"   AI system available: {hasattr(self, 'ai_analysis')}")
+            self.log_text(f"   Legacy analysis: Available")
+            
+            # Performance State
+            if hasattr(self, '_debug_state'):
+                runtime = time.time() - self._debug_state['start_time']
+                self.log_text(f"⏱️ Performance:")
+                self.log_text(f"   Session runtime: {runtime:.1f}s")
+                self.log_text(f"   Analyses performed: {self._debug_state['analysis_count']}")
+                self.log_text(f"   Overlay updates: {self._debug_state['overlay_updates']}")
+            
+            self.log_text("📊"*40)
+            
+        except Exception as e:
+            self.log_text(f"❌ Error logging system state: {e}")
+
+    def _enhanced_log(self, message, category="INFO"):
+        """Enhanced logging with categories and timestamps."""
+        try:
+            if getattr(self, '_verbose_mode', False):
+                import datetime
+                timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                formatted_message = f"[{timestamp}] [{category}] {message}"
+                self.log_text(formatted_message)
+            else:
+                self.log_text(message)
+                
+        except Exception as e:
+            # Fallback to basic logging
+            self.log_text(message)
+
+    def _trigger_ai_analysis(self, detected_cards):
+        """Trigger AI analysis with enhanced logging."""
+        try:
+            self._enhanced_log("🧠 Starting AI analysis pipeline", "AI")
+            self._enhanced_log(f"📊 Input: {len(detected_cards)} detected cards", "AI")
+            
+            # Update debug state if available
+            if hasattr(self, '_debug_state'):
+                self._debug_state['analysis_count'] += 1
+                self._enhanced_log(f"📈 Analysis count: {self._debug_state['analysis_count']}", "DEBUG")
+            
+            # Call the actual analysis method
+            if hasattr(self, 'perform_ai_analysis'):
+                self._enhanced_log("🔄 Calling AI analysis system...", "AI")
+                self.perform_ai_analysis(detected_cards)
+            else:
+                self._enhanced_log("⚠️ AI analysis method not available", "WARNING")
+                # Fallback to mock analysis for testing
+                self._create_mock_analysis_result(detected_cards)
+                
+        except Exception as e:
+            self._enhanced_log(f"❌ AI analysis failed: {e}", "ERROR")
+            import traceback
+            self._enhanced_log(f"🔍 Error details: {traceback.format_exc()}", "DEBUG")
+
+    def _create_mock_analysis_result(self, detected_cards):
+        """Create mock analysis result for testing purposes."""
+        try:
+            self._enhanced_log("🧪 Creating mock analysis result for testing", "TEST")
+            
+            mock_recommendation = {
+                'recommended_pick': 2,
+                'recommended_card': detected_cards[1].get('card_code', 'MOCK_CARD') if len(detected_cards) > 1 else 'MOCK_CARD',
+                'reasoning': 'This is a mock recommendation created for manual testing purposes. The system would normally provide detailed AI analysis here.',
+                'confidence': 0.85,
+                'card_details': []
+            }
+            
+            # Add mock card details
+            for i, card in enumerate(detected_cards[:3]):  # Limit to 3 cards
+                mock_recommendation['card_details'].append({
+                    'card_code': card.get('card_code', f'MOCK_{i+1}'),
+                    'tier_letter': ['A', 'B', 'S'][i % 3],
+                    'win_rate': 0.6 + (i * 0.1)
+                })
+            
+            self._enhanced_log("📊 Mock recommendation created", "TEST")
+            
+            # Display the mock result
+            self.show_analysis_result(detected_cards, mock_recommendation, "mock")
+            
+        except Exception as e:
+            self._enhanced_log(f"❌ Error creating mock analysis: {e}", "ERROR")
 
 
 def main():

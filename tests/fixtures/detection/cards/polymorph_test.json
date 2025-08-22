@@ -1,0 +1,13 @@
+{
+  "id": "polymorph_test",
+  "name": "Polymorph",
+  "mana_cost": 4,
+  "rarity": "common",
+  "card_type": "spell",
+  "fixture_type": "positive_control",
+  "expected_match": true,
+  "image_dimensions": [
+    200,
+    280
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "id": "legenday_minion_test",
+  "name": "Test Legendary",
+  "mana_cost": 8,
+  "rarity": "legendary",
+  "card_type": "minion",
+  "fixture_type": "positive_control",
+  "expected_match": true,
+  "image_dimensions": [
+    200,
+    280
+  ]
+}

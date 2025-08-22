@@ -1,0 +1,22 @@
+{
+  "cards": [
+    {
+      "id": "flamestrike_7",
+      "name": "Flamestrike",
+      "mana_cost": 7,
+      "tier_score": 78.0
+    },
+    {
+      "id": "mirror_image_1",
+      "name": "Mirror Image",
+      "mana_cost": 1,
+      "tier_score": 45.0
+    },
+    {
+      "id": "polymorph_4",
+      "name": "Polymorph",
+      "mana_cost": 4,
+      "tier_score": 82.0
+    }
+  ]
+}

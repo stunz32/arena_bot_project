@@ -1,0 +1,302 @@
+[
+  {
+    "id": "test_card_1",
+    "name": "Test Warrior Card",
+    "mana_cost": 3,
+    "card_class": "warrior",
+    "rarity": "common",
+    "card_type": "minion",
+    "tier_score": 75,
+    "arena_legal": true
+  },
+  {
+    "id": "test_card_2",
+    "name": "Test Mage Card",
+    "mana_cost": 2,
+    "card_class": "mage",
+    "rarity": "rare",
+    "card_type": "spell",
+    "tier_score": 82,
+    "arena_legal": true
+  },
+  {
+    "id": "test_card_3",
+    "name": "Test Neutral Card",
+    "mana_cost": 4,
+    "card_class": "neutral",
+    "rarity": "epic",
+    "card_type": "minion",
+    "tier_score": 68,
+    "arena_legal": true
+  },
+  {
+    "id": "test_card_1",
+    "name": "Test Warrior Card",
+    "mana_cost": 3,
+    "card_class": "warrior",
+    "rarity": "common",
+    "card_type": "minion",
+    "tier_score": 75,
+    "arena_legal": true
+  },
+  {
+    "id": "test_card_2",
+    "name": "Test Mage Card",
+    "mana_cost": 2,
+    "card_class": "mage",
+    "rarity": "rare",
+    "card_type": "spell",
+    "tier_score": 82,
+    "arena_legal": true
+  },
+  {
+    "id": "test_card_3",
+    "name": "Test Neutral Card",
+    "mana_cost": 4,
+    "card_class": "neutral",
+    "rarity": "epic",
+    "card_type": "minion",
+    "tier_score": 68,
+    "arena_legal": true
+  },
+  {
+    "id": "test_card_1",
+    "name": "Test Warrior Card",
+    "mana_cost": 3,
+    "card_class": "warrior",
+    "rarity": "common",
+    "card_type": "minion",
+    "tier_score": 75,
+    "arena_legal": true
+  },
+  {
+    "id": "test_card_2",
+    "name": "Test Mage Card",
+    "mana_cost": 2,
+    "card_class": "mage",
+    "rarity": "rare",
+    "card_type": "spell",
+    "tier_score": 82,
+    "arena_legal": true
+  },
+  {
+    "id": "test_card_3",
+    "name": "Test Neutral Card",
+    "mana_cost": 4,
+    "card_class": "neutral",
+    "rarity": "epic",
+    "card_type": "minion",
+    "tier_score": 68,
+    "arena_legal": true
+  },
+  {
+    "id": "test_card_1",
+    "name": "Test Warrior Card",
+    "mana_cost": 3,
+    "card_class": "warrior",
+    "rarity": "common",
+    "card_type": "minion",
+    "tier_score": 75,
+    "arena_legal": true
+  },
+  {
+    "id": "test_card_2",
+    "name": "Test Mage Card",
+    "mana_cost": 2,
+    "card_class": "mage",
+    "rarity": "rare",
+    "card_type": "spell",
+    "tier_score": 82,
+    "arena_legal": true
+  },
+  {
+    "id": "test_card_3",
+    "name": "Test Neutral Card",
+    "mana_cost": 4,
+    "card_class": "neutral",
+    "rarity": "epic",
+    "card_type": "minion",
+    "tier_score": 68,
+    "arena_legal": true
+  },
+  {
+    "id": "test_card_1",
+    "name": "Test Warrior Card",
+    "mana_cost": 3,
+    "card_class": "warrior",
+    "rarity": "common",
+    "card_type": "minion",
+    "tier_score": 75,
+    "arena_legal": true
+  },
+  {
+    "id": "test_card_2",
+    "name": "Test Mage Card",
+    "mana_cost": 2,
+    "card_class": "mage",
+    "rarity": "rare",
+    "card_type": "spell",
+    "tier_score": 82,
+    "arena_legal": true
+  },
+  {
+    "id": "test_card_3",
+    "name": "Test Neutral Card",
+    "mana_cost": 4,
+    "card_class": "neutral",
+    "rarity": "epic",
+    "card_type": "minion",
+    "tier_score": 68,
+    "arena_legal": true
+  },
+  {
+    "id": "test_card_1",
+    "name": "Test Warrior Card",
+    "mana_cost": 3,
+    "card_class": "warrior",
+    "rarity": "common",
+    "card_type": "minion",
+    "tier_score": 75,
+    "arena_legal": true
+  },
+  {
+    "id": "test_card_2",
+    "name": "Test Mage Card",
+    "mana_cost": 2,
+    "card_class": "mage",
+    "rarity": "rare",
+    "card_type": "spell",
+    "tier_score": 82,
+    "arena_legal": true
+  },
+  {
+    "id": "test_card_3",
+    "name": "Test Neutral Card",
+    "mana_cost": 4,
+    "card_class": "neutral",
+    "rarity": "epic",
+    "card_type": "minion",
+    "tier_score": 68,
+    "arena_legal": true
+  },
+  {
+    "id": "test_card_1",
+    "name": "Test Warrior Card",
+    "mana_cost": 3,
+    "card_class": "warrior",
+    "rarity": "common",
+    "card_type": "minion",
+    "tier_score": 75,
+    "arena_legal": true
+  },
+  {
+    "id": "test_card_2",
+    "name": "Test Mage Card",
+    "mana_cost": 2,
+    "card_class": "mage",
+    "rarity": "rare",
+    "card_type": "spell",
+    "tier_score": 82,
+    "arena_legal": true
+  },
+  {
+    "id": "test_card_3",
+    "name": "Test Neutral Card",
+    "mana_cost": 4,
+    "card_class": "neutral",
+    "rarity": "epic",
+    "card_type": "minion",
+    "tier_score": 68,
+    "arena_legal": true
+  },
+  {
+    "id": "test_card_1",
+    "name": "Test Warrior Card",
+    "mana_cost": 3,
+    "card_class": "warrior",
+    "rarity": "common",
+    "card_type": "minion",
+    "tier_score": 75,
+    "arena_legal": true
+  },
+  {
+    "id": "test_card_2",
+    "name": "Test Mage Card",
+    "mana_cost": 2,
+    "card_class": "mage",
+    "rarity": "rare",
+    "card_type": "spell",
+    "tier_score": 82,
+    "arena_legal": true
+  },
+  {
+    "id": "test_card_3",
+    "name": "Test Neutral Card",
+    "mana_cost": 4,
+    "card_class": "neutral",
+    "rarity": "epic",
+    "card_type": "minion",
+    "tier_score": 68,
+    "arena_legal": true
+  },
+  {
+    "id": "test_card_1",
+    "name": "Test Warrior Card",
+    "mana_cost": 3,
+    "card_class": "warrior",
+    "rarity": "common",
+    "card_type": "minion",
+    "tier_score": 75,
+    "arena_legal": true
+  },
+  {
+    "id": "test_card_2",
+    "name": "Test Mage Card",
+    "mana_cost": 2,
+    "card_class": "mage",
+    "rarity": "rare",
+    "card_type": "spell",
+    "tier_score": 82,
+    "arena_legal": true
+  },
+  {
+    "id": "test_card_3",
+    "name": "Test Neutral Card",
+    "mana_cost": 4,
+    "card_class": "neutral",
+    "rarity": "epic",
+    "card_type": "minion",
+    "tier_score": 68,
+    "arena_legal": true
+  },
+  {
+    "id": "test_card_1",
+    "name": "Test Warrior Card",
+    "mana_cost": 3,
+    "card_class": "warrior",
+    "rarity": "common",
+    "card_type": "minion",
+    "tier_score": 75,
+    "arena_legal": true
+  },
+  {
+    "id": "test_card_2",
+    "name": "Test Mage Card",
+    "mana_cost": 2,
+    "card_class": "mage",
+    "rarity": "rare",
+    "card_type": "spell",
+    "tier_score": 82,
+    "arena_legal": true
+  },
+  {
+    "id": "test_card_3",
+    "name": "Test Neutral Card",
+    "mana_cost": 4,
+    "card_class": "neutral",
+    "rarity": "epic",
+    "card_type": "minion",
+    "tier_score": 68,
+    "arena_legal": true
+  }
+]

@@ -1,0 +1,84 @@
+{
+  "image_dimensions": [
+    1920,
+    1080
+  ],
+  "card_positions": [
+    {
+      "index": 0,
+      "position": [
+        735,
+        233,
+        450,
+        500
+      ],
+      "mana_center": [
+        760,
+        258
+      ],
+      "art_region": [
+        750,
+        283,
+        420,
+        380
+      ],
+      "name_region": [
+        745,
+        673,
+        430,
+        40
+      ]
+    },
+    {
+      "index": 1,
+      "position": [
+        1235,
+        233,
+        450,
+        500
+      ],
+      "mana_center": [
+        1260,
+        258
+      ],
+      "art_region": [
+        1250,
+        283,
+        420,
+        380
+      ],
+      "name_region": [
+        1245,
+        673,
+        430,
+        40
+      ]
+    },
+    {
+      "index": 2,
+      "position": [
+        1735,
+        233,
+        450,
+        500
+      ],
+      "mana_center": [
+        1760,
+        258
+      ],
+      "art_region": [
+        1750,
+        283,
+        420,
+        380
+      ],
+      "name_region": [
+        1745,
+        673,
+        430,
+        40
+      ]
+    }
+  ],
+  "creation_info": "Synthetic DPI test fixture"
+}

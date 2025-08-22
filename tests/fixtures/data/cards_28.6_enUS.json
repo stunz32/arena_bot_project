@@ -1,0 +1,22 @@
+[
+  {
+    "id": "frostbolt_2",
+    "name": "Frostbolt", 
+    "cost": 2,
+    "type": "Spell",
+    "rarity": "Free",
+    "set": "Basic",
+    "collectible": true,
+    "patch_version": "28.6"
+  },
+  {
+    "id": "ice_lance_1",
+    "name": "Ice Lance",
+    "cost": 1, 
+    "type": "Spell",
+    "rarity": "Common",
+    "set": "Classic",
+    "collectible": true,
+    "patch_version": "28.6"
+  }
+]

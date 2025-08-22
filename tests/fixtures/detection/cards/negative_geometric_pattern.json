@@ -1,0 +1,11 @@
+{
+  "id": "negative_geometric_pattern",
+  "name": "Negative Control: Geometric_Pattern",
+  "fixture_type": "negative_control",
+  "expected_match": false,
+  "control_type": "geometric_pattern",
+  "image_dimensions": [
+    200,
+    280
+  ]
+}

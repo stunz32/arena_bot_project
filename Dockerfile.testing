@@ -1,0 +1,43 @@
+# Testing Container with OpenCV Headless
+# Implements your friend's Docker recommendation
+
+FROM python:3.11-slim
+
+# Install system dependencies for Qt6 and X11
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    xvfb \
+    libxkbcommon-x11-0 \
+    libxkbcommon0 \
+    libxcb1 \
+    libxcb-render0 \
+    libxcb-shape0 \
+    libxcb-xfixes0 \
+    libxcb-image0 \
+    libxcb-keysyms1 \
+    libxcb-icccm4 \
+    libxcb-randr0 \
+    libxcb-util1 \
+    libxcb-cursor0 \
+    libopengl0 \
+    libegl1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy requirements
+COPY requirements.txt requirements-test.txt ./
+
+# Install Python dependencies (opencv-python-headless for testing)
+RUN pip install -r requirements.txt -r requirements-test.txt
+
+# Copy project files
+COPY . .
+
+# Set test environment variables
+ENV TEST_PROFILE=1
+ENV QT_QPA_PLATFORM=offscreen
+ENV LIBGL_ALWAYS_SOFTWARE=1
+ENV QT_PLUGIN_PATH=
+
+# Default command runs tests
+CMD ["bash", "-c", "xvfb-run -s '-screen 0 1920x1200x24' python test_comprehensive_bot_headless.py --auto-fix"]

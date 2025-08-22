@@ -11,7 +11,8 @@ import gc
 import psutil
 import os
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
-from threading import BoundedQueue, Event, Lock
+from threading import Event, Lock
+from arena_bot.utils.bounded_queue import BoundedQueue
 import multiprocessing
 import random
 import sys

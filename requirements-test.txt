@@ -1,0 +1,28 @@
+# Testing Dependencies with OpenCV Headless
+# Replaces opencv-python with headless version to prevent Qt conflicts
+
+# Core Testing Framework
+pytest==7.4.3
+pytest-qt==4.4.0
+pytest-xvfb==3.0.0
+pytest-timeout==2.4.0
+pytest-benchmark==4.0.0
+pytest-cov==4.1.0
+
+# Error Injection & Mocking
+responses==0.25.3
+requests-mock==1.11.0
+pyfakefs==5.6.0
+
+# OpenCV Headless (prevents Qt conflicts)
+opencv-python-headless==4.8.1.78
+
+# GUI Testing Support
+Xvfb-run==1.0.0
+
+# Performance & Memory Testing
+psutil==5.9.6
+memory-profiler==0.61.0
+
+# Keep existing testing utilities
+# Note: tkinter is built-in, but we'll isolate it from PyQt6 tests

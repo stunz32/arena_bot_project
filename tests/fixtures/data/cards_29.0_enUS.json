@@ -1,0 +1,52 @@
+[
+  {
+    "id": "fireball_4",
+    "name": "Fireball",
+    "cost": 4,
+    "type": "Spell",
+    "rarity": "Free",
+    "set": "Basic",
+    "collectible": true,
+    "patch_version": "29.0"
+  },
+  {
+    "id": "polymorph_4", 
+    "name": "Polymorph",
+    "cost": 4,
+    "type": "Spell",
+    "rarity": "Free", 
+    "set": "Basic",
+    "collectible": true,
+    "patch_version": "29.0"
+  },
+  {
+    "id": "flamestrike_7",
+    "name": "Flamestrike", 
+    "cost": 7,
+    "type": "Spell",
+    "rarity": "Free",
+    "set": "Basic", 
+    "collectible": true,
+    "patch_version": "29.0"
+  },
+  {
+    "id": "arcane_intellect_3",
+    "name": "Arcane Intellect",
+    "cost": 3,
+    "type": "Spell", 
+    "rarity": "Free",
+    "set": "Basic",
+    "collectible": true,
+    "patch_version": "29.0"
+  },
+  {
+    "id": "mirror_image_1",
+    "name": "Mirror Image",
+    "cost": 1,
+    "type": "Spell",
+    "rarity": "Free",
+    "set": "Basic",
+    "collectible": true,
+    "patch_version": "29.0"
+  }
+]
