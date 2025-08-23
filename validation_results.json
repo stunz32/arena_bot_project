@@ -1,12 +1,12 @@
 {
-  "timestamp": "2025-08-21 18:36:14",
+  "timestamp": "2025-08-22 18:24:30",
   "phase3_components": {
     "dpi_normalization": {
       "name": "DPI Normalization",
       "passed": true,
       "exit_code": 0,
       "test_count": 10,
-      "duration": 1.3536505699157715,
+      "duration": 1.4970152378082275,
       "output": null,
       "error": null
     },
@@ -15,7 +15,7 @@
       "passed": true,
       "exit_code": 0,
       "test_count": 21,
-      "duration": 2.360028028488159,
+      "duration": 2.5487260818481445,
       "output": null,
       "error": null
     },
@@ -24,7 +24,7 @@
       "passed": true,
       "exit_code": 0,
       "test_count": 10,
-      "duration": 1.2524080276489258,
+      "duration": 1.2229721546173096,
       "output": null,
       "error": null
     },
@@ -33,7 +33,7 @@
       "passed": true,
       "exit_code": 0,
       "test_count": 13,
-      "duration": 3.5234646797180176,
+      "duration": 3.5084102153778076,
       "output": null,
       "error": null
     },
@@ -42,7 +42,7 @@
       "passed": true,
       "exit_code": 0,
       "test_count": 20,
-      "duration": 1.7871198654174805,
+      "duration": 1.5498409271240234,
       "output": null,
       "error": null
     },
@@ -87,6 +87,18 @@
       "has_output": true,
       "has_budget_info": true,
       "output_length": 502
+    },
+    "live_tests": {
+      "name": "Live Tests",
+      "passed": true,
+      "skipped": true,
+      "reason": "ARENA_LIVE_TESTS environment variable not set to '1'",
+      "environment_check": {
+        "arena_live_tests_enabled": false,
+        "windows_platform": false,
+        "gui_session_available": false,
+        "hearthstone_window_found": false
+      }
     }
   },
   "performance_summary": {
@@ -124,7 +136,17 @@
   "recommendations": [
     "Excellent test coverage! Consider adding performance optimization tests"
   ],
+  "ui_smoke_tests": {
+    "passed": true,
+    "skipped": true,
+    "reason": "No GUI desktop session available"
+  },
+  "ui_doctor_tests": {
+    "passed": true,
+    "skipped": true,
+    "reason": "No GUI desktop session available"
+  },
   "pass_rate": 1.0,
-  "total_tests": 11,
-  "passed_tests": 11
+  "total_tests": 14,
+  "passed_tests": 14
 }

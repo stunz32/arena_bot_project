@@ -428,3 +428,83 @@ def dump_stage_timing(stage: str, duration_ms: float, metadata: Optional[Dict] =
     }
     
     dump_json(timing_data, f"timing_{stage}")
+
+
+class DebugDumpManager:
+    """
+    Manager class for debug dump operations.
+    
+    Provides a class-based interface to the debug dump functionality
+    for easier use in tests and applications.
+    """
+    
+    def __init__(self):
+        """Initialize debug dump manager."""
+        self.current_run_dir = None
+        self.is_active = False
+    
+    def start_dump(self, tag: str) -> Path:
+        """
+        Start a debug dump session.
+        
+        Args:
+            tag: Debug run tag
+            
+        Returns:
+            Path to debug run directory
+        """
+        self.current_run_dir = begin_run(tag)
+        self.is_active = True
+        return self.current_run_dir
+    
+    def end_dump(self):
+        """End the current debug dump session."""
+        if self.is_active:
+            end_run()
+            self.is_active = False
+    
+    def save_image(self, image, name: str, quality: int = DEFAULT_IMAGE_QUALITY) -> Optional[Path]:
+        """
+        Save an image to the debug dump.
+        
+        Args:
+            image: Image array (numpy array)
+            name: Base name for the image file
+            quality: JPEG quality (0-100)
+            
+        Returns:
+            Path to saved image file, or None if not active
+        """
+        if not self.is_active:
+            return None
+        
+        return dump_image(image, name, quality)
+    
+    def save_json(self, data: Dict[str, Any], name: str) -> Optional[Path]:
+        """
+        Save JSON data to the debug dump.
+        
+        Args:
+            data: Data to save as JSON
+            name: Base name for the JSON file
+            
+        Returns:
+            Path to saved JSON file, or None if not active
+        """
+        if not self.is_active:
+            return None
+        
+        return dump_json(data, name)
+    
+    def get_current_dump_dir(self) -> Optional[Path]:
+        """
+        Get the current debug dump directory.
+        
+        Returns:
+            Path to current dump directory, or None if not active
+        """
+        return self.current_run_dir if self.is_active else None
+    
+    def is_dump_active(self) -> bool:
+        """Check if debug dump is currently active."""
+        return self.is_active

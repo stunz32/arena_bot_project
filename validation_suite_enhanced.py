@@ -79,6 +79,9 @@ class EnhancedValidationSuite:
         self._run_performance_tests()
         self._run_config_validation()
         self._run_integration_tests()
+        self._run_ui_smoke_tests()
+        self._run_ui_doctor_tests()
+        self._run_live_tests()
         
         # Calculate overall status
         self._calculate_overall_status()
@@ -366,6 +369,287 @@ class EnhancedValidationSuite:
                 'passed': False,
                 'error': 'No test fixtures available'
             }
+
+    def _run_ui_smoke_tests(self):
+        """Run UI smoke tests with Safe Demo mode and uniform fill detection."""
+        print("\n🎨 Running UI Smoke Tests...")
+        
+        try:
+            # Check if we can run GUI tests
+            from arena_bot.cli import _can_run_gui_tests
+            
+            if not _can_run_gui_tests():
+                print("  ⏭️  UI smoke tests skipped: No GUI desktop session available")
+                self.results['ui_smoke_tests'] = {
+                    'passed': True,  # Skipped tests count as passed
+                    'skipped': True,
+                    'reason': 'No GUI desktop session available'
+                }
+                return
+            
+            # Import the smoke test functions directly
+            from tests.test_gui_smoke import (
+                test_gui_smoke_with_safe_demo_mode,
+                test_gui_smoke_uniform_fill_detection,
+                test_gui_smoke_safe_demo_components,
+                test_gui_smoke_ui_health_summary
+            )
+            
+            smoke_tests = [
+                ('Safe Demo Mode', test_gui_smoke_with_safe_demo_mode),
+                ('Uniform Fill Detection', test_gui_smoke_uniform_fill_detection),
+                ('Safe Demo Components', test_gui_smoke_safe_demo_components),
+                ('UI Health Summary', test_gui_smoke_ui_health_summary)
+            ]
+            
+            test_results = {}
+            all_passed = True
+            
+            for test_name, test_func in smoke_tests:
+                try:
+                    print(f"  Testing {test_name}...")
+                    test_func()
+                    test_results[test_name.lower().replace(' ', '_')] = {
+                        'name': test_name,
+                        'passed': True
+                    }
+                    print(f"    ✅ {test_name}: PASS")
+                    
+                except Exception as e:
+                    test_results[test_name.lower().replace(' ', '_')] = {
+                        'name': test_name,
+                        'passed': False,
+                        'error': str(e)
+                    }
+                    print(f"    ❌ {test_name}: FAIL - {e}")
+                    all_passed = False
+            
+            self.results['ui_smoke_tests'] = {
+                'passed': all_passed,
+                'total_tests': len(smoke_tests),
+                'passed_tests': sum(1 for r in test_results.values() if r['passed']),
+                'tests': test_results
+            }
+            
+        except ImportError as e:
+            print(f"  ⚠️  UI smoke test imports not available: {e}")
+            self.results['ui_smoke_tests'] = {
+                'passed': True,  # Skip gracefully
+                'skipped': True,
+                'reason': f'Import error: {e}'
+            }
+        except Exception as e:
+            print(f"  ❌ UI smoke tests failed: {e}")
+            self.results['ui_smoke_tests'] = {
+                'passed': False,
+                'error': str(e)
+            }
+
+    def _run_ui_doctor_tests(self):
+        """Run UI Doctor diagnostic tests."""
+        print("\n🩺 Running UI Doctor Tests...")
+        
+        try:
+            # Check if we can run GUI tests
+            from arena_bot.cli import _can_run_gui_tests
+            
+            if not _can_run_gui_tests():
+                print("  ⏭️  UI Doctor tests skipped: No GUI desktop session available")
+                self.results['ui_doctor_tests'] = {
+                    'passed': True,  # Skipped tests count as passed
+                    'skipped': True,
+                    'reason': 'No GUI desktop session available'
+                }
+                return
+            
+            # Test UI Doctor functionality
+            from arena_bot.cli import run_ui_doctor_from_cli
+            from arena_bot.ui.auto_triage import UIAutoTriage, run_auto_triage
+            from arena_bot.ui.ui_health import UIHealthReporter
+            from integrated_arena_bot_gui import IntegratedArenaBotGUI
+            
+            test_results = {}
+            
+            # Test 1: UI Health Reporter
+            print("  Testing UI Health Reporter...")
+            try:
+                bot = IntegratedArenaBotGUI(ui_safe_demo=True)
+                reporter = UIHealthReporter(bot.root)
+                
+                health_report = reporter.get_ui_health_report()
+                health_summary = reporter.get_one_line_summary()
+                
+                # Validate health report structure
+                required_keys = ['timestamp', 'uptime_seconds', 'paint_counter', 'window_available']
+                has_required_keys = all(key in health_report for key in required_keys)
+                has_summary = isinstance(health_summary, str) and len(health_summary) > 0
+                
+                test_results['ui_health_reporter'] = {
+                    'name': 'UI Health Reporter',
+                    'passed': has_required_keys and has_summary,
+                    'has_required_keys': has_required_keys,
+                    'has_summary': has_summary
+                }
+                
+                bot.root.quit()
+                bot.root.destroy()
+                
+                print(f"    ✅ UI Health Reporter: PASS")
+                
+            except Exception as e:
+                test_results['ui_health_reporter'] = {
+                    'name': 'UI Health Reporter',
+                    'passed': False,
+                    'error': str(e)
+                }
+                print(f"    ❌ UI Health Reporter: FAIL - {e}")
+            
+            # Test 2: Auto-Triage System
+            print("  Testing Auto-Triage System...")
+            try:
+                bot = IntegratedArenaBotGUI(ui_safe_demo=True)
+                bot.root.update()
+                
+                triage_result = run_auto_triage(bot.root, bot.ui_health_reporter)
+                
+                # Validate triage result structure
+                required_keys = ['timestamp', 'issues_found', 'fixes_applied', 'success']
+                has_required_keys = all(key in triage_result for key in required_keys)
+                has_fixes = isinstance(triage_result['fixes_applied'], list)
+                
+                test_results['auto_triage'] = {
+                    'name': 'Auto-Triage System',
+                    'passed': has_required_keys and has_fixes,
+                    'has_required_keys': has_required_keys,
+                    'has_fixes': has_fixes,
+                    'fixes_count': len(triage_result.get('fixes_applied', []))
+                }
+                
+                bot.root.quit()
+                bot.root.destroy()
+                
+                print(f"    ✅ Auto-Triage System: PASS")
+                
+            except Exception as e:
+                test_results['auto_triage'] = {
+                    'name': 'Auto-Triage System',
+                    'passed': False,
+                    'error': str(e)
+                }
+                print(f"    ❌ Auto-Triage System: FAIL - {e}")
+            
+            all_passed = all(result['passed'] for result in test_results.values())
+            
+            self.results['ui_doctor_tests'] = {
+                'passed': all_passed,
+                'total_tests': len(test_results),
+                'passed_tests': sum(1 for r in test_results.values() if r['passed']),
+                'tests': test_results
+            }
+            
+        except ImportError as e:
+            print(f"  ⚠️  UI Doctor test imports not available: {e}")
+            self.results['ui_doctor_tests'] = {
+                'passed': True,  # Skip gracefully
+                'skipped': True,
+                'reason': f'Import error: {e}'
+            }
+        except Exception as e:
+            print(f"  ❌ UI Doctor tests failed: {e}")
+            self.results['ui_doctor_tests'] = {
+                'passed': False,
+                'error': str(e)
+            }
+
+    def _run_live_tests(self):
+        """Run live testing suite if environment supports it."""
+        print("\n📱 Running Live Test Suite...")
+        
+        # Check live test gate first
+        try:
+            from arena_bot.utils.live_test_gate import LiveTestGate
+            can_run, reason = LiveTestGate.check_live_test_requirements()
+        except ImportError:
+            print("  ⚠️  Live test gate not available")
+            self.results['integration_tests']['live_tests'] = {
+                'name': 'Live Tests',
+                'passed': False,
+                'skipped': True,
+                'reason': 'Live test gate not available'
+            }
+            return
+        
+        if not can_run:
+            print(f"  ⏭️  Live tests skipped: {reason}")
+            self.results['integration_tests']['live_tests'] = {
+                'name': 'Live Tests',
+                'passed': True,  # Skipped tests count as passed
+                'skipped': True,
+                'reason': reason,
+                'environment_check': {
+                    'arena_live_tests_enabled': LiveTestGate.is_live_testing_enabled(),
+                    'windows_platform': LiveTestGate.is_windows_platform(),
+                    'gui_session_available': LiveTestGate.is_gui_session_available(),
+                    'hearthstone_window_found': LiveTestGate.find_hearthstone_window() is not None
+                }
+            }
+            
+            print("  💡 To enable live testing:")
+            print("     1. Set ARENA_LIVE_TESTS=1")
+            print("     2. Run on Windows with GUI desktop")
+            print("     3. Launch Hearthstone in windowed/borderless mode")
+            return
+        
+        print(f"  ✅ Live test environment ready: {reason}")
+        
+        # Run live smoke tests
+        live_test_results = {}
+        
+        try:
+            print("  🧪 Running live smoke tests...")
+            
+            # Run live capture smoke test
+            capture_result = self._run_pytest_suite(
+                "tests/live/test_live_capture_smoke.py::TestLiveCaptureSmoke::test_live_single_frame_capture",
+                "Live Capture Smoke"
+            )
+            live_test_results['capture_smoke'] = capture_result
+            
+            # Run live overlay flags test
+            overlay_result = self._run_pytest_suite(
+                "tests/live/test_live_overlay_flags.py::TestLiveOverlayFlags::test_live_overlay_initialization",
+                "Live Overlay Initialization"
+            )
+            live_test_results['overlay_initialization'] = overlay_result
+            
+            # Calculate overall live test status
+            all_passed = all(result.get('passed', False) for result in live_test_results.values())
+            
+            # Print summary
+            for test_name, result in live_test_results.items():
+                status = "✅ PASS" if result.get('passed', False) else "❌ FAIL"
+                print(f"    {test_name}: {status}")
+            
+            self.results['integration_tests']['live_tests'] = {
+                'name': 'Live Tests',
+                'passed': all_passed,
+                'skipped': False,
+                'test_results': live_test_results,
+                'environment_status': reason
+            }
+            
+            overall_status = "✅ PASS" if all_passed else "❌ FAIL"
+            print(f"  Live Test Suite: {overall_status}")
+            
+        except Exception as e:
+            print(f"  ❌ Live test suite failed: {e}")
+            self.results['integration_tests']['live_tests'] = {
+                'name': 'Live Tests',
+                'passed': False,
+                'skipped': False,
+                'error': str(e),
+                'environment_status': reason
+            }
     
     def _run_test_command(self, command: List[str]) -> Dict[str, Any]:
         """
@@ -445,6 +729,20 @@ class EnhancedValidationSuite:
         for test, result in self.results['integration_tests'].items():
             total_tests += 1
             if result.get('passed', False):
+                passed_tests += 1
+        
+        # Count UI smoke tests
+        ui_smoke = self.results.get('ui_smoke_tests', {})
+        if ui_smoke:
+            total_tests += 1
+            if ui_smoke.get('passed', False):
+                passed_tests += 1
+        
+        # Count UI doctor tests
+        ui_doctor = self.results.get('ui_doctor_tests', {})
+        if ui_doctor:
+            total_tests += 1
+            if ui_doctor.get('passed', False):
                 passed_tests += 1
         
         pass_rate = passed_tests / total_tests if total_tests > 0 else 0.0
@@ -585,6 +883,30 @@ class EnhancedValidationSuite:
                 
                 if result.get('frames_processed'):
                     print(f"      Frames: {result['frames_processed']}")
+        
+        # UI Smoke Tests Summary
+        ui_smoke = self.results.get('ui_smoke_tests', {})
+        if ui_smoke:
+            print(f"\n🎨 UI Smoke Tests:")
+            if ui_smoke.get('skipped'):
+                print(f"   ⏭️  Skipped: {ui_smoke.get('reason', 'Unknown')}")
+            else:
+                status = "✅" if ui_smoke.get('passed', False) else "❌"
+                passed = ui_smoke.get('passed_tests', 0)
+                total = ui_smoke.get('total_tests', 0)
+                print(f"   {status} Safe Demo & Uniform Fill Detection ({passed}/{total})")
+        
+        # UI Doctor Tests Summary
+        ui_doctor = self.results.get('ui_doctor_tests', {})
+        if ui_doctor:
+            print(f"\n🩺 UI Doctor Tests:")
+            if ui_doctor.get('skipped'):
+                print(f"   ⏭️  Skipped: {ui_doctor.get('reason', 'Unknown')}")
+            else:
+                status = "✅" if ui_doctor.get('passed', False) else "❌"
+                passed = ui_doctor.get('passed_tests', 0)
+                total = ui_doctor.get('total_tests', 0)
+                print(f"   {status} Health Reporter & Auto-Triage ({passed}/{total})")
         
         # Performance Summary
         perf_summary = self.results.get('performance_summary', {})

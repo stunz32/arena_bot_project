@@ -39,6 +39,20 @@ def parse_args():
     )
     
     parser.add_argument(
+        "--source",
+        type=str,
+        choices=["live", "replay"],
+        default="live",
+        help="Source mode: 'live' for real capture, 'replay' for offline processing (default: live)"
+    )
+    
+    parser.add_argument(
+        "--live-smoke",
+        action="store_true",
+        help="Live smoke mode: perform single capture-and-render pass, print diag, and exit"
+    )
+    
+    parser.add_argument(
         "--offline",
         action="store_true",
         help="Offline mode: prevent network calls, use cached/static data"
@@ -48,6 +62,18 @@ def parse_args():
         "--diag",
         action="store_true", 
         help="Diagnostics mode: print per-stage timing and performance info"
+    )
+    
+    parser.add_argument(
+        "--ui-safe-demo",
+        action="store_true",
+        help="UI Safe Demo mode: render diagnostic UI elements independent of CV/AI data"
+    )
+    
+    parser.add_argument(
+        "--ui-doctor",
+        action="store_true",
+        help="UI Doctor mode: diagnose UI health and exit with status code"
     )
     
     return parser.parse_args()
@@ -76,14 +102,41 @@ def main():
     # Print mode flags
     if args.replay:
         print(f"📼 Replay mode: {args.replay}")
+    if args.source == "live":
+        print("📱 Source: Live capture")
+    elif args.source == "replay":
+        print("📼 Source: Replay mode")
+    if args.live_smoke:
+        print("🧪 Live smoke mode: single capture and exit")
     if args.offline:
         print("🌐 Offline mode: no network calls")
     if args.diag:
         print("📊 Diagnostics mode: timing enabled")
+    if args.ui_safe_demo:
+        print("🎨 UI Safe Demo mode: diagnostic rendering enabled")
+    if args.ui_doctor:
+        print("🩺 UI Doctor mode: diagnostic UI health check")
     
-    # Handle replay mode
+    # Handle replay mode (legacy support)
     if args.replay:
         run_replay_from_cli(args)
+        return
+    
+    # Handle source modes
+    if args.source == "replay" and not args.replay:
+        print("❌ Error: --source=replay requires --replay argument")
+        sys.exit(1)
+    
+    # Handle UI doctor mode
+    if args.ui_doctor:
+        from arena_bot.cli import run_ui_doctor_from_cli
+        run_ui_doctor_from_cli(args)
+        return
+    
+    # Handle live smoke mode
+    if args.live_smoke:
+        from arena_bot.cli import run_live_smoke_from_cli
+        run_live_smoke_from_cli(args)
         return
     
     try:
@@ -118,6 +171,13 @@ def main():
             
             logger.info("Arena Bot fully operational")
             
+            # If GUI flags are present, launch GUI instead of staying in CLI mode
+            if args.ui_safe_demo or args.ui_doctor:
+                print("\n🖥️ Launching GUI interface...")
+                from integrated_arena_bot_gui import IntegratedArenaBotGUI
+                bot = IntegratedArenaBotGUI(ui_safe_demo=args.ui_safe_demo)
+                bot.run()
+                
         else:
             print("❌ Failed to initialize card recognition system")
             logger.error("Card recognition system initialization failed")
